@@ -3247,13 +3247,16 @@ center.innerHTML = '<div class="bc-label">' + (isEn() ? 'Custom' : '具体加注
   };
   panel.appendChild(center);
 
-  // 面板尺寸（从 CSS 变量读，移动端小一点）
-  const panelW = panel.offsetWidth || 380;
-  const panelH = panel.offsetHeight || 380;
-  const cx = panelW / 2;
-  const cy = panelH;
+
+// 面板尺寸（从 CSS 变量读，移动端小一点）
+const panelW = panel.offsetWidth || 380;
+const panelH = panel.offsetHeight || 380;
+// ★ 紫球圆心在 panel 底边中点：cx 水平居中，cy = panelH
+const cx = panelW / 2;
+const cy = panelH;
 const isPortrait = G.isMobile && G.orientation === 'portrait';
-const r = isPortrait ? 130 : 150;   // ★ 半径拉大，圆弧远离中心
+// ★ 半径收回到 120 / 140，保证预设都在 panel 内可见
+const r = isPortrait ? 120 : 140;
 
   // 主预设（不含 allin）
   const n = presets.length;
