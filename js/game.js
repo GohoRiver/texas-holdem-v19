@@ -3208,7 +3208,6 @@ function openBubbleBetPanel(){
 
   closeBubbleBetPanel();
 
-  // 遮罩
   const backdrop = document.createElement('div');
   backdrop.className = 'bubble-backdrop';
   backdrop.id = 'bubbleBackdrop';
@@ -3216,54 +3215,84 @@ function openBubbleBetPanel(){
   document.body.appendChild(backdrop);
   requestAnimationFrame(function(){ backdrop.classList.add('show'); });
 
-  // 面板
   const panel = document.createElement('div');
   panel.id = 'bubbleBetPanel';
   panel.className = 'bubble-bet-panel';
 
   const toCall = Math.max(0, oldBet - (me.currentBet || 0));
-  const potAfter = G.pot + toCall;
+  const isFirstBettor = (oldBet === 0);
 
-  // 快捷尺度：1/3、1/2、2/3、1x、1.5x、2x、3x、allin
-  const presets = [
-    { label: '1/3', ratio: 1/3 },
-    { label: '1/2', ratio: 0.5 },
-    { label: '2/3', ratio: 2/3 },
-    { label: '1x',  ratio: 1.0 },
-    { label: '1.5x', ratio: 1.5 },
-    { label: '2x',  ratio: 2.0 },
-    { label: '3x',  ratio: 3.0 }
-  ];
+  /* ★ 根据场景切换预设 */
+  let presets;
+  if(isFirstBettor){
+    /* 场景 A：第一个下注者 — 用"几分之几池" */
+    presets = [
+      { label: '1/3池', ratio: 1/3, mode: 'pot-bet' },
+      { label: '1/2池', ratio: 0.5, mode: 'pot-bet' },
+      { label: '2/3池', ratio: 2/3, mode: 'pot-bet' },
+      { label: '1池',   ratio: 1.0, mode: 'pot-bet' },
+      { label: '1.5池', ratio: 1.5, mode: 'pot-bet' },
+      { label: '2池',   ratio: 2.0, mode: 'pot-bet' },
+      { label: '3池',   ratio: 3.0, mode: 'pot-bet' }
+    ];
+  } else {
+    /* 场景 B：面对前位下注 — 倍数 + 池倍加注 */
+    presets = [
+      { label: '2x',   ratio: 2.0, mode: 'mult' },
+      { label: '3x',   ratio: 3.0, mode: 'mult' },
+      { label: '4x',   ratio: 4.0, mode: 'mult' },
+      { label: '满池',  ratio: 1.0, mode: 'pot-raise' },
+      { label: '1.5池', ratio: 1.5, mode: 'pot-raise' },
+      { label: '2池',   ratio: 2.0, mode: 'pot-raise' },
+      { label: '3池',   ratio: 3.0, mode: 'pot-raise' }
+    ];
+  }
 
-  // 中心按钮：打开精确输入（slider）
-const center = document.createElement('div');
-center.className = 'bubble-center';
-center.innerHTML = '<div class="bc-label">' + (isEn() ? 'Custom' : '具体加注') + '</div>'
-                 + '<div class="bc-amt">' + fmtNum(minT) + '</div>';
+  /* 中心紫球：跳老版精确输入 */
+  const center = document.createElement('div');
+  center.className = 'bubble-center';
+  center.innerHTML = '<div class="bc-label">' + (isEn() ? 'Custom' : '具体加注') + '</div>'
+                   + '<div class="bc-amt">' + fmtNum(minT) + '</div>';
   center.onclick = function(ev){
     ev.stopPropagation();
     closeBubbleBetPanel();
-    openRaisePanel();   // 打开原有 slider 面板做精确输入
+    openRaisePanel();
   };
   panel.appendChild(center);
 
+  const panelW = panel.offsetWidth || 380;
+  const panelH = panel.offsetHeight || 380;
+  const cx = panelW / 2;
+  const cy = panelH;
+  const isPortrait = G.isMobile && G.orientation === 'portrait';
+  const r = isPortrait ? 120 : 140;
 
-// 面板尺寸（从 CSS 变量读，移动端小一点）
-const panelW = panel.offsetWidth || 380;
-const panelH = panel.offsetHeight || 380;
-// ★ 紫球圆心在 panel 底边中点：cx 水平居中，cy = panelH
-const cx = panelW / 2;
-const cy = panelH;
-const isPortrait = G.isMobile && G.orientation === 'portrait';
-// ★ 半径收回到 120 / 140，保证预设都在 panel 内可见
-const r = isPortrait ? 120 : 140;
+  /* ★ 三种模式分别计算 */
+  function computeBubbleTarget(preset){
+    let target;
+    if(preset.mode === 'pot-bet'){
+      /* 场景 A：直接下注 pot × ratio */
+      target = Math.floor(G.pot * preset.ratio);
+    } else if(preset.mode === 'mult'){
+      /* 场景 B：当前下注 × 倍数 */
+      target = Math.floor(oldBet * preset.ratio);
+    } else if(preset.mode === 'pot-raise'){
+      /* 场景 B：标准 pot-sized raise */
+      /* target = currentBet + (pot + toCall) × ratio */
+      target = oldBet + Math.floor((G.pot + toCall) * preset.ratio);
+    } else {
+      target = minT;
+    }
+    if(target < minT) target = minT;
+    if(target > max) target = max;
+    return target;
+  }
 
-  // 主预设（不含 allin）
   const n = presets.length;
   const angleStart = -75, angleEnd = 75;
   presets.forEach(function(p, i){
     const angle = n === 1 ? 0 : (angleStart + (angleEnd - angleStart) * (i / (n - 1)));
-    const target = computePresetTarget(p.ratio, oldBet, potAfter, minT, max);
+    const target = computeBubbleTarget(p);
     if(target <= 0) return;
 
     const rad = angle * Math.PI / 180;
@@ -3286,7 +3315,7 @@ const r = isPortrait ? 120 : 140;
     panel.appendChild(item);
   });
 
-  // All-in 放在最右更外侧一点
+  /* ALL IN 单独放最右侧 */
   const allinAngle = 96;
   const allinRad = allinAngle * Math.PI / 180;
   const allinX = cx + r * Math.sin(allinRad);
