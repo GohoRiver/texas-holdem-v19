@@ -3236,10 +3236,10 @@ function openBubbleBetPanel(){
   ];
 
   // 中心按钮：打开精确输入（slider）
-  const center = document.createElement('div');
-  center.className = 'bubble-center';
-  center.innerHTML = '<div class="bc-label">' + (isEn() ? 'Raise' : '加注') + '</div>'
-                   + '<div class="bc-amt">' + fmtNum(minT) + '</div>';
+const center = document.createElement('div');
+center.className = 'bubble-center';
+center.innerHTML = '<div class="bc-label">' + (isEn() ? 'Custom' : '具体加注') + '</div>'
+                 + '<div class="bc-amt">' + fmtNum(minT) + '</div>';
   center.onclick = function(ev){
     ev.stopPropagation();
     closeBubbleBetPanel();
@@ -3252,8 +3252,8 @@ function openBubbleBetPanel(){
   const panelH = panel.offsetHeight || 380;
   const cx = panelW / 2;
   const cy = panelH;
-  const isPortrait = G.isMobile && G.orientation === 'portrait';
-  const r = isPortrait ? 105 : 130;
+const isPortrait = G.isMobile && G.orientation === 'portrait';
+const r = isPortrait ? 130 : 150;   // ★ 半径拉大，圆弧远离中心
 
   // 主预设（不含 allin）
   const n = presets.length;
