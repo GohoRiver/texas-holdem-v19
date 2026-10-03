@@ -2984,7 +2984,7 @@ body .mini-card.face .s{
 .bubble-bet-panel .bubble-center{
   position: absolute;
   left: 50%;
-  bottom: 0;
+  bottom: 50vh;
   transform: translate(-50%, 50%);
   width: 84px;
   height: 84px;
@@ -3069,7 +3069,9 @@ body.is-mobile.orientation-portrait .seat-hand-type{
   font-size: 9px; bottom: -18px; padding: 2px 6px;
 }
 body.is-mobile.orientation-portrait .bubble-bet-panel{
-  width: 320px; height: 320px;
+    width: 340px;
+  height: 340px;
+  bottom: 46vh; 
 }
 body.is-mobile.orientation-portrait .bubble-bet-panel .bubble-item{
   width: 56px; height: 56px;
