@@ -2965,11 +2965,10 @@ body .mini-card.face .s{
   50%{ transform: translateX(-50%) scale(1.15) rotate(5deg); }
 }
 
-/* ===== 气泡式下注面板 ===== */
 .bubble-bet-panel{
   position: fixed;
   left: 50%;
-  bottom: 0;
+  bottom: 40vh;                 /* ★ 桌面端：屏幕中下部，比之前高一些 */
   transform: translateX(-50%);
   width: 380px;
   height: 380px;
@@ -2984,8 +2983,8 @@ body .mini-card.face .s{
 .bubble-bet-panel .bubble-center{
   position: absolute;
   left: 50%;
-  bottom: 50vh;
-  transform: translate(-50%, 50%);
+  top: 100%;                    /* ★ 圆心精确落在 panel 底边 */
+  transform: translate(-50%, -50%);  /* ★ 不再往下推 42px */
   width: 84px;
   height: 84px;
   border-radius: 50%;
@@ -3001,7 +3000,7 @@ body .mini-card.face .s{
   z-index: 10;
   user-select: none;
 }
-.bubble-bet-panel .bubble-center:active{ transform: translate(-50%, 50%) scale(.94); }
+.bubble-bet-panel .bubble-center:active{ transform: translate(-50%, -50%) scale(.94); }
 .bubble-bet-panel .bubble-center .bc-label{
   font-size: 11px; opacity: .85;
 }
@@ -3069,9 +3068,9 @@ body.is-mobile.orientation-portrait .seat-hand-type{
   font-size: 9px; bottom: -18px; padding: 2px 6px;
 }
 body.is-mobile.orientation-portrait .bubble-bet-panel{
-    width: 340px;
+  width: 340px;
   height: 340px;
-  bottom: 46vh; 
+  bottom: 34vh;                 /* ★ 手机端：屏幕中下部，拇指可及 */
 }
 body.is-mobile.orientation-portrait .bubble-bet-panel .bubble-item{
   width: 56px; height: 56px;
