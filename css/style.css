@@ -3181,3 +3181,66 @@ body.is-mobile.orientation-portrait .settlement-panel{
 body.is-mobile.orientation-landscape .settlement-panel{
   top: 44%; min-width: 200px; padding: 12px 16px;
 }
+
+/* ★ 主池赢家：金色皇冠 */
+.seat.winner-main{
+  border-color: #fbbf24 !important;
+  box-shadow:
+    0 0 24px rgba(251,191,36,.9),
+    0 0 48px rgba(251,191,36,.5),
+    0 8px 20px rgba(0,0,0,.6) !important;
+  animation: winnerMainGlow 1.5s ease-in-out infinite;
+}
+.seat.winner-main::before{
+  content: '🏆';
+  position: absolute;
+  top: -20px; left: 50%;
+  transform: translateX(-50%);
+  font-size: 22px;
+  filter: drop-shadow(0 0 8px #fbbf24);
+  z-index: 20;
+}
+@keyframes winnerMainGlow{
+  0%,100%{ box-shadow: 0 0 24px rgba(251,191,36,.9), 0 0 48px rgba(251,191,36,.5), 0 8px 20px rgba(0,0,0,.6); }
+  50%{ box-shadow: 0 0 36px rgba(251,191,36,1), 0 0 72px rgba(251,191,36,.7), 0 8px 20px rgba(0,0,0,.6); }
+}
+
+/* ★ 边池赢家：银色皇冠 */
+.seat.winner-side{
+  border-color: #cbd5e1 !important;
+  box-shadow:
+    0 0 20px rgba(203,213,225,.8),
+    0 0 40px rgba(203,213,225,.4),
+    0 8px 20px rgba(0,0,0,.6) !important;
+}
+.seat.winner-side::before{
+  content: '🥈';
+  position: absolute;
+  top: -20px; left: 50%;
+  transform: translateX(-50%);
+  font-size: 20px;
+  filter: drop-shadow(0 0 6px #cbd5e1);
+  z-index: 20;
+}
+
+/* ★ 座位上方的 +N / −N 浮出动画 */
+.seat-delta{
+  position: absolute;
+  left: 50%; top: -8px;
+  transform: translateX(-50%);
+  font-size: 18px; font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  z-index: 50;
+  pointer-events: none;
+  text-shadow: 0 0 8px rgba(0,0,0,.9), 0 0 12px currentColor;
+  animation: seatDeltaFloat 2.6s ease-out forwards;
+}
+.seat-delta.pos{ color: #4ade80; }
+.seat-delta.neg{ color: #f87171; }
+.seat-delta.fade{ opacity: 0; transition: opacity .4s; }
+@keyframes seatDeltaFloat{
+  0%{ opacity: 0; transform: translateX(-50%) translateY(8px) scale(.7); }
+  15%{ opacity: 1; transform: translateX(-50%) translateY(-12px) scale(1.15); }
+  40%{ transform: translateX(-50%) translateY(-18px) scale(1); }
+  100%{ opacity: 1; transform: translateX(-50%) translateY(-40px) scale(1); }
+}
