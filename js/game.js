@@ -475,13 +475,23 @@ function awardUncontestedPot(){
     w.chips += pot;
     log(t("winsPot", { name: w.name, pot: fmtNum(pot) }), "win");
     PokerAudio.play("win");
+  } else if(alive.length === 0 && pot > 0){
+    // ★ 新增：全场弃牌（理论不该发生）→ 退还给贡献者
+    console.warn('[awardUncontestedPot] all folded, refunding contributors, pot:', pot);
+    const contributors = G.players.filter(function(p){ return (p.totalContributed || 0) > 0; });
+    const total = contributors.reduce(function(s, p){ return s + p.totalContributed; }, 0);
+    if(total > 0){
+      contributors.forEach(function(p){
+        const refund = Math.floor(pot * (p.totalContributed / total));
+        p.chips += refund;
+      });
+    }
   }
   G.pot = 0;
   G.stage = "showdown";
   G.busy = false; G._busySince = 0;
   clearAllGameTimers();
 }
-
 /* ================= 等待栏 ================= */
 function ensureWaitingBar(){
   let bar = document.getElementById('waitingBar');
@@ -2538,8 +2548,11 @@ function calculateSidePots(){
   const contributors = G.players
     .filter(function(p){ return (p.totalContributed || 0) > 0; })
     .map(function(p){ return { player: p, amount: p.totalContributed, folded: p.folded }; });
+
   const pots = [];
+  let pendingDeadMoney = 0;   // ★ 新增：累积"全弃牌层"的筹码
   let guard = 0;
+
   while(contributors.some(function(x){ return x.amount > 0; }) && guard < 20){
     guard++;
     const active = contributors.filter(function(x){ return x.amount > 0; });
@@ -2552,8 +2565,39 @@ function calculateSidePots(){
       x.amount -= minA;
       if(!x.folded) eligible.push(x.player);
     });
-    pots.push({ amount: amt, eligible: eligible });
+
+    if(eligible.length === 0){
+      // ★ 修复：这一层全是弃牌玩家贡献的"死筹码"
+      // 不丢，先累积，等下一个有合格玩家的层一起并入
+      pendingDeadMoney += amt;
+    } else {
+      pots.push({
+        amount: amt + pendingDeadMoney,
+        eligible: eligible
+      });
+      pendingDeadMoney = 0;
+    }
   }
+
+  // ★ 兜底：循环结束还有死筹码（说明最高层也全弃牌）
+  if(pendingDeadMoney > 0){
+    if(pots.length > 0){
+      // 加到最后一个非空池子
+      pots[pots.length - 1].amount += pendingDeadMoney;
+      console.warn('[sidePots] dead money merged into last pot:', pendingDeadMoney);
+    } else {
+      // 极端情况：所有玩家全弃牌，但仍有人下了筹码
+      // 退还给所有"仍在场"的玩家，避免筹码消失
+      const alive = G.players.filter(function(p){ return !p.folded && p.seated !== false; });
+      if(alive.length > 0){
+        pots.push({ amount: pendingDeadMoney, eligible: alive.slice() });
+        console.warn('[sidePots] dead money refunded to alive players:', pendingDeadMoney);
+      } else {
+        console.error('[sidePots] CRITICAL: all players folded with dead money:', pendingDeadMoney);
+      }
+    }
+  }
+
   return pots;
 }
 
@@ -2596,8 +2640,20 @@ function resolveAi(cont){
     const pots = calculateSidePots();
     const n = pots.length;
     let anyTie = false;
-    pots.forEach(function(pot, i){
-      if(!pot.eligible.length) return;
+pots.forEach(function(pot, i){
+  if(!pot.eligible.length){
+    console.warn('[resolve] Empty eligible pot detected, amount:', pot.amount);
+    // 把筹码退还给所有仍下的贡献者（按比例）
+    const contributors = G.players.filter(function(p){ return (p.totalContributed || 0) > 0; });
+    const total = contributors.reduce(function(s, p){ return s + p.totalContributed; }, 0);
+    if(total > 0){
+      contributors.forEach(function(p){
+        const refund = Math.floor(pot.amount * (p.totalContributed / total));
+        p.chips += refund;
+      });
+    }
+    return;
+  }
       let best = null, ws = [];
       pot.eligible.forEach(function(p){
         if(best === null || PokerEval.compare(p._score, best) > 0){ best = p._score; ws = [p]; }
