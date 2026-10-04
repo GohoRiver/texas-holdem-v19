@@ -267,7 +267,8 @@ function showScreen(name){
 
 /* ================= 大厅数据 ================= */
 function refreshBalanceUI(){
-  const r = PokerStorage.getRealChips();
+const rBem = (window.PokerWallet && PokerWallet.isConnected()) ? PokerWallet.getContractBalance() : 0;
+  const r = Math.floor(rBem / CHIP_TO_BEM); // ★ 将链上 BEM 余额换算成筹码数
   const pts = PokerStorage.getPoints();
   const ai = PokerStorage.getAiChips();
   const rEl = $("realBalance"); if(rEl) rEl.textContent = fmtNum(r);
@@ -1068,7 +1069,8 @@ function checkOnlinePreconditions(lv, mode){
       $("walletOverlay").classList.remove("hidden");
       return false;
     }
-    if(PokerStorage.getRealChips() < lv.buyMax){
+    const chainChips = Math.floor((window.PokerWallet ? PokerWallet.getContractBalance() : 0) / CHIP_TO_BEM);
+    if(chainChips < lv.buyMax){
       appToast(isEn() ? ("Not enough chips. Need " + lv.buyMax.toLocaleString())
                       : ("对战场筹码不足，需要 " + lv.buyMax.toLocaleString() + " 筹码"), "error");
       return false;
@@ -2724,11 +2726,13 @@ function showRebuy(){
       if(pts < amount){ PokerStorage.addPoints(amount - pts + 10000); pts = PokerStorage.getPoints(); }
       PokerStorage.setPoints(pts - amount);
     } else if(G.gameMode === 'real'){
-      if(PokerStorage.getRealChips() < amount){
+      const chainChips = Math.floor((window.PokerWallet ? PokerWallet.getContractBalance() : 0) / CHIP_TO_BEM);
+      if(chainChips < amount){
         appToast(isEn() ? "Not enough chips. Please deposit BEM." : "对战场筹码不足，请充值 BEM", "error");
         return;
       }
-      PokerStorage.setRealChips(PokerStorage.getRealChips() - amount);
+      // ★ 注意：玩家补码不需要在前端扣除余额，因为在合约层面，余额是在玩家坐下/退出时才结算。
+      // 这里只是把筹码发到游戏桌上。
     }
     me.chips = amount;
     G.sessionBuyIn += amount;
@@ -2762,7 +2766,11 @@ function backToLobby(){
     const pnl = me.chips - G.sessionBuyIn;
     if(G.gameMode === 'ai') PokerStorage.addAiChips(me.chips);
     else if(G.gameMode === 'points') PokerStorage.addPoints(me.chips);
-    else if(G.gameMode === 'real') PokerStorage.addRealChips(me.chips);
+    else if(G.gameMode === 'real'){
+      // ★ 真金模式：不再往本地加筹码，账本由链上合约控制。
+      // 这里只需要提示玩家去钱包界面提现即可。
+      console.log('[real mode] player left with chips:', me.chips);
+    }
     PokerStorage.addSession({
       table: G.tableLabel, blinds: G.smallBlind + "/" + G.bigBlind,
       buyIn: G.sessionBuyIn, pnl: pnl, hands: G.sessionHands,
