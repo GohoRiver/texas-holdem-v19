@@ -3896,7 +3896,6 @@ document.addEventListener("DOMContentLoaded", function(){
     try {
       const res = await PokerWallet.depositBem(amt);
       if(res && res.netChips > 0){
-        PokerStorage.setRealChips(PokerStorage.getRealChips() + res.netChips);
         refreshBalanceUI();
         $("depositAmount").value = "";
         appToast(isEn() ? ("Deposited +" + res.netChips.toLocaleString()) : ("充值成功 +" + res.netChips.toLocaleString()), "success");
