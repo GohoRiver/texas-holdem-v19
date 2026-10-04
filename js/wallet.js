@@ -6,7 +6,7 @@ const PLATFORM_ADDRESS = '0x1219c18adc187c918d0216eb7b983f5068eeb19a';
 const BEM_ADDRESS = '0x5ce033b2bfca3af30b3e8c8457deaf776a8b695a';
 
 /* 德州扑克合约地址 */
-const CONTRACT_ADDRESS = '0x19fab85122f24586218c101366ef081ca91cc2c3';
+const CONTRACT_ADDRESS = '0x0b99bFd1F26aEa9Cc44159e9A074eA03A2C77689';
   const FEE_RATE = 0.02;
   const BSC_CHAIN_ID = '0x38';
   const CHIP_TO_BEM = 0.0001;
@@ -23,15 +23,196 @@ const CONTRACT_ADDRESS = '0x19fab85122f24586218c101366ef081ca91cc2c3';
   ];
 
   const CONTRACT_ABI = [
-    { "inputs": [{ "internalType": "address", "name": "_bem", "type": "address" }], "stateMutability": "nonpayable", "type": "constructor" },
-    { "anonymous": false, "inputs": [ { "indexed": true, "internalType": "address", "name": "player", "type": "address" }, { "indexed": false, "internalType": "uint256", "name": "amount", "type": "uint256" } ], "name": "Deposited", "type": "event" },
-    { "anonymous": false, "inputs": [ { "indexed": true, "internalType": "address", "name": "player", "type": "address" }, { "indexed": false, "internalType": "uint256", "name": "amount", "type": "uint256" } ], "name": "Withdrawn", "type": "event" },
-    { "inputs": [{ "internalType": "address", "name": "", "type": "address" }], "name": "balances", "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" },
-    { "inputs": [], "name": "bemToken", "outputs": [{ "internalType": "contract IERC20", "name": "", "type": "address" }], "stateMutability": "view", "type": "function" },
-    { "inputs": [{ "internalType": "uint256", "name": "_amount", "type": "uint256" }], "name": "deposit", "outputs": [], "stateMutability": "nonpayable", "type": "function" },
-    { "inputs": [{ "internalType": "address", "name": "_player", "type": "address" }], "name": "getBalance", "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" },
-    { "inputs": [], "name": "owner", "outputs": [{ "internalType": "address", "name": "", "type": "address" }], "stateMutability": "view", "type": "function" },
-    { "inputs": [{ "internalType": "uint256", "name": "_amount", "type": "uint256" }], "name": "withdraw", "outputs": [], "stateMutability": "nonpayable", "type": "function" }
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "_bem",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "nonpayable",
+      "type": "constructor"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "player",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "amount",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "fee",
+          "type": "uint256"
+        }
+      ],
+      "name": "Deposited",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "owner",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "amount",
+          "type": "uint256"
+        }
+      ],
+      "name": "FeeCollected",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "player",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "amount",
+          "type": "uint256"
+        }
+      ],
+      "name": "Withdrawn",
+      "type": "event"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "name": "balances",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "bemToken",
+      "outputs": [
+        {
+          "internalType": "contract IERC20",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "_amount",
+          "type": "uint256"
+        }
+      ],
+      "name": "deposit",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "_player",
+          "type": "address"
+        }
+      ],
+      "name": "getBalance",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "owner",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "name": "platformFees",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "_amount",
+          "type": "uint256"
+        }
+      ],
+      "name": "withdraw",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "withdrawPlatformFees",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    }
   ];
 
   let provider = null;
@@ -178,124 +359,67 @@ const CONTRACT_ADDRESS = '0x19fab85122f24586218c101366ef081ca91cc2c3';
      全程用 BigInt 精确计算，避免浮点误差
      ========================================================= */
   async function depositBem(amountBem){
-    if(!signer || !userAddress){
-      throw new Error('钱包未连接');
-    }
-    const amount = Number(amountBem);
-    if(!amount || amount < 0.001){
-      throw new Error('最低充值 0.001 BEM');
-    }
-    if(amount > bemBalance){
-      throw new Error('钱包 BEM 不足：当前 ' + bemBalance.toFixed(4) + '，需要 ' + amount);
-    }
+  if(!signer || !userAddress) throw new Error('钱包未连接');
+  const amount = Number(amountBem);
+  if(!amount || amount < 0.001) throw new Error('最低充值 0.001 BEM');
+  if(amount > bemBalance) throw new Error('钱包 BEM 不足');
 
-    /* ★ 用 BigInt 精确拆分：先把用户输入截断到 6 位小数，再转 wei */
-    const amountStr = amount.toFixed(6);
-    const amountWei = ethers.parseUnits(amountStr, decimals);
-    const feeWei = (amountWei * FEE_NUM) / FEE_DEN;
-    const netWei = amountWei - feeWei;
+  // 1. 转换为 wei 精度
+  const amountWei = ethers.parseUnits(amount.toFixed(6), decimals);
 
-    /* netChips：用 BigInt 除法（netWei / (0.0001 * 10^decimals)） */
-    const chipWeiPerChip = ethers.parseUnits(CHIP_TO_BEM.toString(), decimals);
-    const netChipsBig = netWei / chipWeiPerChip;
-    const netChips = Number(netChipsBig);
+  const bemContract = new ethers.Contract(BEM_ADDRESS, BEM_ABI, signer);
+  const gameContract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
 
-    console.log('[deposit] 输入:', amount, 'decimals:', decimals);
-    console.log('[deposit] amountWei =', amountWei.toString());
-    console.log('[deposit] feeWei    =', feeWei.toString());
-    console.log('[deposit] netWei    =', netWei.toString());
-    console.log('[deposit] netChips  =', netChips);
+  // 2. 授权合约全额（合约内部会自动扣 2% 给平台）
+  console.log('[deposit] step1 approve...');
+  const approveTx = await bemContract.approve(CONTRACT_ADDRESS, amountWei);
+  await approveTx.wait();
+  console.log('[deposit] approve ok:', approveTx.hash);
 
-    if(netChips <= 0){
-      throw new Error('扣手续费后不足 1 筹码，请提高金额');
-    }
+  // 3. 调用合约 deposit（内部记账：98% 给玩家，2% 给平台）
+  console.log('[deposit] step2 contract.deposit...');
+  const depositTx = await gameContract.deposit(amountWei);
+  await depositTx.wait();
+  console.log('[deposit] deposit ok:', depositTx.hash);
 
-    const bemContract = new ethers.Contract(BEM_ADDRESS, BEM_ABI, signer);
-    const gameContract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
+  // 4. 刷新链上余额
+  await refreshBemBalance();
+  await refreshContractBalance();
+  updateUI();
 
-    /* 第 1 步：approve */
-    let approveTx;
-    try {
-      console.log('[deposit] step1 approve...');
-      approveTx = await bemContract.approve(CONTRACT_ADDRESS, netWei);
-      await approveTx.wait();
-      console.log('[deposit] approve ok:', approveTx.hash);
-    } catch(e){
-      console.error('[deposit] approve failed', e);
-      throw new Error('第1步 approve 失败：' + errMsg(e));
-    }
-
-    /* 第 2 步：手续费转给平台 */
-    if(feeWei > 0n){
-      try {
-        console.log('[deposit] step2 fee transfer...');
-        const feeTx = await bemContract.transfer(PLATFORM_ADDRESS, feeWei);
-        await feeTx.wait();
-        console.log('[deposit] fee ok:', feeTx.hash);
-      } catch(e){
-        console.error('[deposit] fee transfer failed', e);
-        throw new Error('第2步 手续费转账失败：' + errMsg(e));
-      }
-    }
-
-    /* 第 3 步：deposit */
-    let depositTx;
-    try {
-      console.log('[deposit] step3 contract.deposit...');
-      depositTx = await gameContract.deposit(netWei);
-      await depositTx.wait();
-      console.log('[deposit] deposit ok:', depositTx.hash);
-    } catch(e){
-      console.error('[deposit] contract deposit failed', e);
-      throw new Error('第3步 deposit 合约调用失败：' + errMsg(e));
-    }
-
-    await refreshBemBalance();
-    await refreshContractBalance();
-    updateUI();
-
-    return {
-      netChips: netChips,
-      netBem: Number(ethers.formatUnits(netWei, decimals)),
-      feeBem: Number(ethers.formatUnits(feeWei, decimals)),
-      txHash: depositTx.hash
-    };
-  }
+  // 5. 返回给前端用于 UI 展示的数据
+  const feeBem = amount * 0.02;
+  const netBem = amount * 0.98;
+  return {
+    netChips: Math.floor(netBem / CHIP_TO_BEM),
+    netBem: netBem,
+    feeBem: feeBem,
+    txHash: depositTx.hash
+  };
+}
 
   /* =========================================================
      提现：调用合约的 withdraw
      ========================================================= */
-  async function withdrawBem(amountBem){
-    if(!signer || !userAddress){
-      throw new Error('钱包未连接');
-    }
-    const amount = Number(amountBem);
-    if(!amount || amount <= 0){
-      throw new Error('请输入提现金额');
-    }
+ async function withdrawBem(amountBem){
+  if(!signer || !userAddress) throw new Error('钱包未连接');
+  const amount = Number(amountBem);
+  if(!amount || amount <= 0) throw new Error('请输入提现金额');
 
-    const amountStr = amount.toFixed(6);
-    const amountWei = ethers.parseUnits(amountStr, decimals);
+  const amountWei = ethers.parseUnits(amount.toFixed(6), decimals);
+  const gameContract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
 
-    console.log('[withdraw] 输入:', amount, 'amountWei =', amountWei.toString());
+  console.log('[withdraw] amountWei =', amountWei.toString());
+  const tx = await gameContract.withdraw(amountWei);
+  await tx.wait();
+  console.log('[withdraw] ok:', tx.hash);
 
-    const gameContract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
-    let tx;
-    try {
-      tx = await gameContract.withdraw(amountWei);
-      await tx.wait();
-      console.log('[withdraw] ok:', tx.hash);
-    } catch(e){
-      console.error('[withdraw] failed', e);
-      throw new Error('提现失败：' + errMsg(e));
-    }
+  await refreshBemBalance();
+  await refreshContractBalance();
+  updateUI();
 
-    await refreshBemBalance();
-    await refreshContractBalance();
-    updateUI();
-
-    return { txHash: tx.hash, amount: amount };
-  }
+  return { txHash: tx.hash, amount: amount };
+}
 
   function getBemBalance(){ return bemBalance; }
   function getContractBalance(){ return contractBalance; }
