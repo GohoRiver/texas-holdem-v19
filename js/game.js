@@ -2754,33 +2754,84 @@ function updateRebuyMsg(lv){
     : ("你的筹码用完了。补码 " + fmtNum(amt) + " 筹码？（最低 " + fmtNum(lv.buyMin) + "）");
 }
 
-function backToLobby(){
+async function backToLobby(){
   stopTurnTimer();
   clearAllGameTimers();
   clearShowCardsTimer();
   if(G.online.active && G.online.isHost && G.online.started && window.PokerOnline.sendHostLeft){
     try { PokerOnline.sendHostLeft(); } catch(e){}
   }
+
   const me = G.players[myIndex()];
+
+  // ★ 真金模式：先进行链上结算，再返回大厅
+  if(me && G.sessionBuyIn > 0 && G.gameMode === 'real' && me.chips !== G.sessionBuyIn){
+    try {
+  const playerAddress = PokerWallet.getAddress();
+
+  // ★ 1. 读链上当前余额（wei 字符串）
+  const chainBalanceWei = await PokerWallet.getContractBalanceWei();
+
+  // ★ 2. 本局盈亏（筹码） = 离桌筹码 - 入桌筹码
+  const deltaChips = me.chips - G.sessionBuyIn;
+
+  // ★ 3. 换算成 wei：1 筹码 = 10^14 wei（= 0.0001 BEM）
+  const deltaWei = BigInt(deltaChips) * 100000000000000n;
+
+  // ★ 4. 新余额 = 旧余额 + 盈亏
+  let newBalanceWei = BigInt(chainBalanceWei) + deltaWei;
+  if (newBalanceWei < 0n) newBalanceWei = 0n;
+
+  const workerUrl = 'https://texas-holdem-settle.2027499636.workers.dev';
+
+  appToast('正在获取签名，请稍候...', '');
+
+  const settleRes = await fetch(workerUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      playerAddress: playerAddress,
+      newBalanceWei: newBalanceWei.toString()
+    })
+  });
+  const settleData = await settleRes.json();
+  if (!settleData.success) throw new Error(settleData.error || '签名失败');
+
+  appToast('请在钱包中确认链上结算...', '');
+
+  // ★ 用 Worker 返回的 nonce（链上读出来的那个）
+  await PokerWallet.settleBalanceOnChain(
+    playerAddress,
+    newBalanceWei.toString(),
+    settleData.nonce,
+    settleData.signature
+  );
+
+  appToast('链上结算成功！', 'success');
+} catch(err) {
+  console.error('链上结算失败:', err);
+  appToast('结算失败：' + (err.message || err), 'error');
+}
+  }
+
   if(me && G.sessionBuyIn > 0){
     const pnl = me.chips - G.sessionBuyIn;
     if(G.gameMode === 'ai') PokerStorage.addAiChips(me.chips);
     else if(G.gameMode === 'points') PokerStorage.addPoints(me.chips);
-    else if(G.gameMode === 'real'){
-      // ★ 真金模式：不再往本地加筹码，账本由链上合约控制。
-      // 这里只需要提示玩家去钱包界面提现即可。
-      console.log('[real mode] player left with chips:', me.chips);
-    }
+    // ★ 真金模式已经通过链上结算，这里不需要再加筹码到本地
+
     PokerStorage.addSession({
       table: G.tableLabel, blinds: G.smallBlind + "/" + G.bigBlind,
       buyIn: G.sessionBuyIn, pnl: pnl, hands: G.sessionHands,
       status: 'left', mode: G.gameMode
     });
   }
+
   if(G.online.active){
     try { PokerOnline.leaveRoom(); } catch(e){}
     G.online.active = false;
   }
+
   resetSessionState();
   resetTableDom();
   hideWaitingBar();
@@ -2807,7 +2858,6 @@ function backToLobby(){
   showScreen("lobby");
   renderRoomLists();
 }
-
 /* ================= 渲染 ================= */
 function renderCardEl(card, mini, hl){
   const d = document.createElement("div");

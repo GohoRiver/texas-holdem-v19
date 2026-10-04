@@ -6,7 +6,7 @@ const PLATFORM_ADDRESS = '0x1219c18adc187c918d0216eb7b983f5068eeb19a';
 const BEM_ADDRESS = '0x5ce033b2bfca3af30b3e8c8457deaf776a8b695a';
 
 /* 德州扑克合约地址 */
-const CONTRACT_ADDRESS = '0x0b99bFd1F26aEa9Cc44159e9A074eA03A2C77689';
+const CONTRACT_ADDRESS = '0xD3A6a1605aDC9092aac058c4ABBBc9B513b0aa7c';
   const FEE_RATE = 0.02;
   const BSC_CHAIN_ID = '0x38';
   const CHIP_TO_BEM = 0.0001;
@@ -23,6 +23,7 @@ const CONTRACT_ADDRESS = '0x0b99bFd1F26aEa9Cc44159e9A074eA03A2C77689';
   ];
 
   const CONTRACT_ABI = [
+ 
     {
       "inputs": [
         {
@@ -76,6 +77,31 @@ const CONTRACT_ADDRESS = '0x0b99bFd1F26aEa9Cc44159e9A074eA03A2C77689';
         }
       ],
       "name": "FeeCollected",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "player",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "oldBalance",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "newBalance",
+          "type": "uint256"
+        }
+      ],
+      "name": "Settled",
       "type": "event"
     },
     {
@@ -162,6 +188,25 @@ const CONTRACT_ADDRESS = '0x0b99bFd1F26aEa9Cc44159e9A074eA03A2C77689';
       "type": "function"
     },
     {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "name": "nonces",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
       "inputs": [],
       "name": "owner",
       "outputs": [
@@ -191,6 +236,34 @@ const CONTRACT_ADDRESS = '0x0b99bFd1F26aEa9Cc44159e9A074eA03A2C77689';
         }
       ],
       "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "_player",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "_newBalance",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "_nonce",
+          "type": "uint256"
+        },
+        {
+          "internalType": "bytes",
+          "name": "_signature",
+          "type": "bytes"
+        }
+      ],
+      "name": "settleBalance",
+      "outputs": [],
+      "stateMutability": "nonpayable",
       "type": "function"
     },
     {
@@ -321,6 +394,18 @@ const CONTRACT_ADDRESS = '0x0b99bFd1F26aEa9Cc44159e9A074eA03A2C77689';
     }
     return contractBalance;
   }
+  // ★ 新增：返回链上余额的 wei 字符串（BigInt 精度，给结算用）
+async function getContractBalanceWei(){
+  if(!provider || !userAddress) return '0';
+  try{
+    const game = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, provider);
+    const raw = await game.getBalance(userAddress);
+    return raw.toString();  // uint256 的字符串
+  }catch(e){
+    console.warn('getContractBalanceWei failed', e);
+    return '0';
+  }
+}
 
   function updateUI(){
     const btn = document.getElementById('connectWalletBtn');
@@ -420,6 +505,16 @@ const CONTRACT_ADDRESS = '0x0b99bFd1F26aEa9Cc44159e9A074eA03A2C77689';
 
   return { txHash: tx.hash, amount: amount };
 }
+  // ★ 离桌结算：由 Cloudflare Worker 签名后，玩家调用链上合约
+   async function settleBalanceOnChain(playerAddress, newBalance, nonce, signature) {
+    if(!signer) throw new Error('钱包未连接');
+    const gameContract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
+    const tx = await gameContract.settleBalance(playerAddress, newBalance, nonce, signature);
+    await tx.wait();
+    await refreshContractBalance();
+    updateUI();
+    return tx;
+  }
 
   function getBemBalance(){ return bemBalance; }
   function getContractBalance(){ return contractBalance; }
@@ -433,8 +528,10 @@ const CONTRACT_ADDRESS = '0x0b99bFd1F26aEa9Cc44159e9A074eA03A2C77689';
     connect,
     depositBem,
     withdrawBem,
+    settleBalanceOnChain,   // ★ 加上这行
     refreshBemBalance,
     refreshContractBalance,
+    getContractBalanceWei,
     updateUI,
     getBemBalance,
     getContractBalance,
