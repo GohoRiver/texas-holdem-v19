@@ -3907,7 +3907,7 @@ document.addEventListener("DOMContentLoaded", function(){
     }
   };
 
-  const wd = $("withdrawBtn");
+    const wd = $("withdrawBtn");
   if(wd) wd.onclick = async function(){
     if(!PokerWallet.isConnected()){ appToast(isEn() ? "Connect wallet first" : "请先连接钱包", "error"); return; }
     const bem = parseFloat($("withdrawAmount").value);
@@ -3917,10 +3917,13 @@ document.addEventListener("DOMContentLoaded", function(){
       return;
     }
     const chipsNeeded = Math.ceil(bem / CHIP_TO_BEM);
-    const have = PokerStorage.getRealChips();
-    if(have < chipsNeeded){
-      appToast(isEn() ? ("Not enough chips. Need " + chipsNeeded.toLocaleString() + ", have " + have.toLocaleString())
-                      : ("筹码不足。需要 " + chipsNeeded.toLocaleString() + " 筹码，当前 " + have.toLocaleString()), "error");
+    // ★ 改为从链上读取余额，不再读本地假账
+    const chainBem = (window.PokerWallet ? PokerWallet.getContractBalance() : 0);
+    const chainChips = Math.floor(chainBem / CHIP_TO_BEM);
+
+    if(chainChips < chipsNeeded){
+      appToast(isEn() ? ("Not enough chips. Need " + chipsNeeded.toLocaleString() + ", have " + chainChips.toLocaleString())
+                      : ("筹码不足。需要 " + chipsNeeded.toLocaleString() + " 筹码，当前 " + chainChips.toLocaleString()), "error");
       return;
     }
     if(!confirm(isEn()
@@ -3930,9 +3933,10 @@ document.addEventListener("DOMContentLoaded", function(){
     }
     try {
       if(window.PokerAudio) PokerAudio.play('chip');
+      // 调用钱包合约提现
       const res = await PokerWallet.withdrawBem(bem);
       if(res && res.txHash){
-        PokerStorage.setRealChips(have - chipsNeeded);
+        // ★ 删除本地的 PokerStorage.setRealChips()，改为刷新链上余额
         refreshBalanceUI();
         $("withdrawAmount").value = "";
         appToast(isEn() ? ("Withdraw success: +" + bem + " BEM") : ("提现成功：+" + bem + " BEM"), "success");
