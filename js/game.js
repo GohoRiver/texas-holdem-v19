@@ -1309,6 +1309,9 @@ async function startNewHandHost(){
   stopTurnTimer();
   G.players.forEach(function(p){
     p.folded = p.chips <= 0 || p.seated === false;
+    p._isWinner = false;      // ★ 新增
+p._winnerType = null;     // ★ 新增：'main' / 'side'
+p._winAmount = 0;         // ★ 新增：本手赢的总筹码
     p.allIn = false; p.currentBet = 0; p.totalContributed = 0;
     p.needsToAct = false; p.lastAction = ""; p.holeCards = [];
     p.revealCards = false; p._highlight = null; p._score = null;
@@ -1371,7 +1374,7 @@ function runHostTurn(){
   if(countActive() <= 1){
     const pot = G.pot;
     awardUncontestedPot();
-    render();
+    seat.classList.toggle("winner", !!p._isWinner && G.stage === 'showdown');;
     if(G.online.isHost) broadcastFullState();
     endHandHost(pot);
     return;
@@ -1524,27 +1527,41 @@ function resolveHost(cont){
     const pots = calculateSidePots();
     const n = pots.length;
     let anyTie = false;
-    pots.forEach(function(pot, i){
-      if(!pot.eligible.length) return;
-      let best = null, ws = [];
-      pot.eligible.forEach(function(p){
-        if(best === null || PokerEval.compare(p._score, best) > 0){ best = p._score; ws = [p]; }
-        else if(PokerEval.compare(p._score, best) === 0) ws.push(p);
-      });
-      if(ws.length > 1) anyTie = true;
-      const each = Math.floor(pot.amount / ws.length);
-      const rem = pot.amount - each * ws.length;
-      ws.forEach(function(w, k){
-  w.chips += each + (k === 0 ? rem : 0);
-  w._isWinner = true;   // ★ 标记赢家
+    G.players.forEach(function(p){
+  p._isWinner = false; p._winAmount = 0; p._winPots = []; p._winnerType = null;
 });
-      const lbl = n === 1 ? t("pot") : (i === 0 ? t("mainPot") : t("sidePot") + " " + i);
-      log(t("winsPotSide",{
-        name:ws.map(function(x){return x.name;}).join(", "),
-        potLabel:lbl, amt:fmtNum(pot.amount), hand:PokerEval.nameOf(best)
-      }), "win");
-      if(!ws[0]._highlight && ws[0]._bestCards) ws[0]._highlight = new Set(ws[0]._bestCards);
-    });
+
+pots.forEach(function(pot, i){
+  if(!pot.eligible.length) return;
+  let best = null, ws = [];
+  pot.eligible.forEach(function(p){
+    if(best === null || PokerEval.compare(p._score, best) > 0){ best = p._score; ws = [p]; }
+    else if(PokerEval.compare(p._score, best) === 0) ws.push(p);
+  });
+  if(ws.length > 1) anyTie = true;
+  const each = Math.floor(pot.amount / ws.length);
+  const rem = pot.amount - each * ws.length;
+  const lbl = n === 1 ? t("pot") : (i === 0 ? t("mainPot") : t("sidePot") + " " + i);
+
+  ws.forEach(function(w, k){
+    const gain = each + (k === 0 ? rem : 0);
+    w.chips += gain;
+    w._isWinner = true;
+    // ★ 新增：追踪每个玩家赢的钱和池子
+    w._winAmount = (w._winAmount || 0) + gain;
+    w._winPots = w._winPots || [];
+    w._winPots.push({ label: lbl, amount: gain });
+    // 主池赢家 → 'main'，其他 → 'side'
+    const isMain = (n === 1) || (i === 0);
+    if(!w._winnerType || isMain) w._winnerType = isMain ? 'main' : (w._winnerType || 'side');
+  });
+
+  log(t("winsPotSide",{
+    name: ws.map(function(x){return x.name;}).join(", "),
+    potLabel: lbl, amt: fmtNum(pot.amount), hand: PokerEval.nameOf(best)
+  }), "win");
+  if(!ws[0]._highlight && ws[0]._bestCards) ws[0]._highlight = new Set(ws[0]._bestCards);
+});
     if(anyTie) showTieDisplay();
     totalPot = pots.reduce(function(s,p){ return s + p.amount; }, 0);
   } catch(e){
@@ -2640,39 +2657,41 @@ function resolveAi(cont){
     const pots = calculateSidePots();
     const n = pots.length;
     let anyTie = false;
-pots.forEach(function(pot, i){
-  if(!pot.eligible.length){
-    console.warn('[resolve] Empty eligible pot detected, amount:', pot.amount);
-    // 把筹码退还给所有仍下的贡献者（按比例）
-    const contributors = G.players.filter(function(p){ return (p.totalContributed || 0) > 0; });
-    const total = contributors.reduce(function(s, p){ return s + p.totalContributed; }, 0);
-    if(total > 0){
-      contributors.forEach(function(p){
-        const refund = Math.floor(pot.amount * (p.totalContributed / total));
-        p.chips += refund;
-      });
-    }
-    return;
-  }
-      let best = null, ws = [];
-      pot.eligible.forEach(function(p){
-        if(best === null || PokerEval.compare(p._score, best) > 0){ best = p._score; ws = [p]; }
-        else if(PokerEval.compare(p._score, best) === 0) ws.push(p);
-      });
-      if(ws.length > 1) anyTie = true;
-      const each = Math.floor(pot.amount / ws.length);
-      const rem = pot.amount - each * ws.length;
-      ws.forEach(function(w, k){
-  w.chips += each + (k === 0 ? rem : 0);
-  w._isWinner = true;
+G.players.forEach(function(p){
+  p._isWinner = false; p._winAmount = 0; p._winPots = []; p._winnerType = null;
 });
-      const lbl = n === 1 ? t("pot") : (i === 0 ? t("mainPot") : t("sidePot") + " " + i);
-      log(t("winsPotSide",{
-        name:ws.map(function(x){return x.name;}).join(", "),
-        potLabel:lbl, amt:fmtNum(pot.amount), hand:PokerEval.nameOf(best)
-      }), "win");
-      if(!ws[0]._highlight && ws[0]._bestCards) ws[0]._highlight = new Set(ws[0]._bestCards);
-    });
+
+pots.forEach(function(pot, i){
+  if(!pot.eligible.length) return;
+  let best = null, ws = [];
+  pot.eligible.forEach(function(p){
+    if(best === null || PokerEval.compare(p._score, best) > 0){ best = p._score; ws = [p]; }
+    else if(PokerEval.compare(p._score, best) === 0) ws.push(p);
+  });
+  if(ws.length > 1) anyTie = true;
+  const each = Math.floor(pot.amount / ws.length);
+  const rem = pot.amount - each * ws.length;
+  const lbl = n === 1 ? t("pot") : (i === 0 ? t("mainPot") : t("sidePot") + " " + i);
+
+  ws.forEach(function(w, k){
+    const gain = each + (k === 0 ? rem : 0);
+    w.chips += gain;
+    w._isWinner = true;
+    // ★ 新增：追踪每个玩家赢的钱和池子
+    w._winAmount = (w._winAmount || 0) + gain;
+    w._winPots = w._winPots || [];
+    w._winPots.push({ label: lbl, amount: gain });
+    // 主池赢家 → 'main'，其他 → 'side'
+    const isMain = (n === 1) || (i === 0);
+    if(!w._winnerType || isMain) w._winnerType = isMain ? 'main' : (w._winnerType || 'side');
+  });
+
+  log(t("winsPotSide",{
+    name: ws.map(function(x){return x.name;}).join(", "),
+    potLabel: lbl, amt: fmtNum(pot.amount), hand: PokerEval.nameOf(best)
+  }), "win");
+  if(!ws[0]._highlight && ws[0]._bestCards) ws[0]._highlight = new Set(ws[0]._bestCards);
+});
     if(anyTie) showTieDisplay();
     totalPot = pots.reduce(function(s,p){ return s + p.amount; }, 0);
   } catch(e){
@@ -2972,8 +2991,10 @@ function render(){
     seat.classList.toggle("empty", p.seated === false);
     seat.classList.toggle("intent-reveal", !!p._intentReveal);
     seat.classList.toggle("winner", !!p._isWinner && G.stage === 'showdown');
+seat.classList.toggle("winner-main", p._winnerType === 'main' && G.stage === 'showdown');
+seat.classList.toggle("winner-side", p._winnerType === 'side' && G.stage === 'showdown');
     seat.classList.toggle("spectating", !!p._spectator);
-    /* ★ 新增：All-in 玩家红色高亮 */
+    /* ★ 新增：All-in 玩家红色高亮 */updateSpectatorUI();
     seat.classList.toggle("all-in", !!p.allIn && !p.folded && p.seated !== false);
     /* ★ 新增：告诉 CSS 筹码堆应该朝哪个方向浮出 */
     seat.setAttribute("data-chip-side", computeChipSideForIndex(i));
@@ -3127,6 +3148,16 @@ function render(){
   if(sl) sl.textContent = t(STAGE_KEYS[G.stage] || "stagePreflop");
   updateHandInfo();
   updateSpectatorUI();
+  // ★ 新增：Showdown 时显示结算面板
+if(G.stage === 'showdown'){
+  const totalWinners = G.players.filter(function(p){ return p._isWinner && p._winAmount > 0; });
+  if(totalWinners.length > 0 && !G._settlementShown){
+    G._settlementShown = true;
+    showSettlementPanel(G.players);
+  }
+} else {
+  G._settlementShown = false;
+}
 
   const meIdx = myIndex();
   const meNow = (meIdx >= 0) ? G.players[meIdx] : null;
@@ -4252,5 +4283,52 @@ document.addEventListener("DOMContentLoaded", function(){
   const hob = $("historyOpenBtn"); if(hob) hob.onclick = openInGameHistory;
   const ihc = $("inGameHistoryClose"); if(ihc) ihc.onclick = closeInGameHistory;
 });
+function showSettlementPanel(players){
+  const winners = players.filter(function(p){ return p._isWinner && p._winAmount > 0; });
+  if(!winners.length) return;
 
+  const el = document.createElement('div');
+  el.className = 'settlement-panel';
+
+  let html = '<div class="settlement-title">' + (isEn() ? 'Settlement' : '本手结算') + '</div>';
+  winners.forEach(function(p){
+    const isMe = p.isHuman;
+    html += '<div class="settlement-row' + (isMe ? ' me' : '') + '">';
+    html += '<span class="settlement-name">🏆 ' + escapeHtml(p.name) + '</span>';
+    html += '<span class="settlement-amount">+' + fmtNum(p._winAmount) + ' ' + t('chips') + '</span>';
+    html += '</div>';
+    // 池子明细
+    if(p._winPots && p._winPots.length > 0){
+      p._winPots.forEach(function(wp){
+        html += '<div class="settlement-sub">· ' + wp.label + ': +' + fmtNum(wp.amount) + '</div>';
+      });
+    }
+  });
+  // 亏损玩家
+  const losers = players.filter(function(p){
+    return !p.folded && p.seated !== false && p.totalContributed > 0 && !p._isWinner;
+  });
+  if(losers.length){
+    html += '<div class="settlement-divider"></div>';
+    losers.forEach(function(p){
+      const delta = -p.totalContributed;
+      html += '<div class="settlement-row loss">';
+      html += '<span class="settlement-name">' + escapeHtml(p.name) + '</span>';
+      html += '<span class="settlement-amount neg">' + fmtNum(delta) + ' ' + t('chips') + '</span>';
+      html += '</div>';
+    });
+  }
+  el.innerHTML = html;
+
+  const tableArea = document.querySelector('.table-area');
+  if(tableArea) tableArea.appendChild(el);
+  else document.body.appendChild(el);
+
+  requestAnimationFrame(function(){ el.classList.add('show'); });
+
+  setTimeout(function(){
+    el.classList.remove('show');
+    setTimeout(function(){ el.remove(); }, 400);
+  }, 4000);
+}
 })();
