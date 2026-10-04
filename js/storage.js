@@ -1,6 +1,6 @@
 window.PokerStorage = (function(){
   const AI_CHIPS_KEY = 'neon_holdem_ai_chips_v3';
-  const REAL_CHIPS_KEY = 'neon_holdem_real_chips_v3';
+  // ★ 删除了 REAL_CHIPS_KEY，真金余额不再存储在本地
   const POINTS_KEY = 'neon_holdem_points_v3';
   const POINTS_INIT_KEY = 'neon_holdem_points_inited_v3';
   const POINTS_LAST_CLAIM_KEY = 'neon_holdem_points_last_claim_v3';
@@ -28,13 +28,7 @@ window.PokerStorage = (function(){
   function addAiChips(v){ setAiChips(getAiChips() + Math.floor(v)); }
   function resetAiChips(){ setAiChips(0); }
 
-  function getRealChips(){
-    const v = parseInt(safeGet(REAL_CHIPS_KEY, '0'), 10);
-    return isNaN(v) ? 0 : Math.max(0, v);
-  }
-  function setRealChips(v){ safeSet(REAL_CHIPS_KEY, String(Math.max(0, Math.floor(v)))); }
-  function addRealChips(v){ setRealChips(getRealChips() + Math.max(0, Math.floor(v))); }
-  function resetRealChips(){ setRealChips(0); }
+  // ★ 真金筹码相关函数（getRealChips, setRealChips 等）已全部移除，改由合约控制
 
   function getPoints(){
     const v = parseInt(safeGet(POINTS_KEY, '0'), 10);
@@ -44,7 +38,7 @@ window.PokerStorage = (function(){
   function addPoints(v){ setPoints(getPoints() + Math.max(0, Math.floor(v))); }
   function resetPoints(){ setPoints(0); }
 
-  /* ★ 删除签到机制，改为首次初始化 10 万积分 */
+  /* ★ 首次初始化 10 万积分 */
   function ensureInitialPoints(){
     if(safeGet(POINTS_INIT_KEY, '0') === '0'){
       if(getPoints() === 0) addPoints(100000);
@@ -154,7 +148,7 @@ window.PokerStorage = (function(){
   return {
     DAILY_POINTS,
     getAiChips, setAiChips, addAiChips, resetAiChips,
-    getRealChips, setRealChips, addRealChips, resetRealChips,
+    // ★ 真金筹码 API 已移除
     getPoints, setPoints, addPoints, resetPoints,
     ensureInitialPoints,
     canClaimToday, claimDailyPoints, getPointsStreak,
