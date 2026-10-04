@@ -3244,3 +3244,10 @@ body.is-mobile.orientation-landscape .settlement-panel{
   40%{ transform: translateX(-50%) translateY(-18px) scale(1); }
   100%{ opacity: 1; transform: translateX(-50%) translateY(-40px) scale(1); }
 }
+
+/* ★ 未跟注返还：灰色，不用红绿色 */
+.seat-delta.refund{
+  color: #94a3b8;
+  font-size: 15px;
+  font-weight: 700;
+}

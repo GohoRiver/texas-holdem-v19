@@ -1555,19 +1555,33 @@ function resolveHost(cont){
       const lbl = n === 1 ? t("pot") : (i === 0 ? t("mainPot") : t("sidePot") + " " + i);
       const isMain = (n === 1) || (i === 0);
 
-      ws.forEach(function(w, k){
-        const gain = each + (k === 0 ? rem : 0);
-        w.chips += gain;
-        w._isWinner = true;
-        w._winAmount = (w._winAmount || 0) + gain;
-        w._winPots = w._winPots || [];
-        w._winPots.push({ label: lbl, amount: gain });
-        if(isMain){
-          w._winnerType = 'main';
-        } else if(w._winnerType !== 'main'){
-          w._winnerType = 'side';
-        }
-      });
+ws.forEach(function(w, k){
+  const gain = each + (k === 0 ? rem : 0);
+  w.chips += gain;
+  w._isWinner = true;
+  w._winAmount = (w._winAmount || 0) + gain;
+  w._winPots = w._winPots || [];
+
+  // ★ 关键改动：区分"真赢"和"未跟注返还"
+  const isRefund = (pot.eligible.length === 1);  // 单人池 = 未跟注返还
+  w._winPots.push({
+    label: lbl,
+    amount: gain,
+    isRefund: isRefund
+  });
+
+  if(isRefund){
+    // 未跟注返还：不亮杯
+    if(!w._winnerType) w._winnerType = 'refund';
+  } else {
+    // 真赢：主池 → main，其他 → side
+    if(isMain){
+      w._winnerType = 'main';
+    } else if(w._winnerType !== 'main'){
+      w._winnerType = 'side';
+    }
+  }
+});
 
       console.log('[resolveHost] Pot', i, lbl,
         '| amount:', pot.amount,
@@ -2710,19 +2724,33 @@ function resolveAi(cont){
       const lbl = n === 1 ? t("pot") : (i === 0 ? t("mainPot") : t("sidePot") + " " + i);
       const isMain = (n === 1) || (i === 0);
 
-      ws.forEach(function(w, k){
-        const gain = each + (k === 0 ? rem : 0);
-        w.chips += gain;
-        w._isWinner = true;
-        w._winAmount = (w._winAmount || 0) + gain;
-        w._winPots = w._winPots || [];
-        w._winPots.push({ label: lbl, amount: gain });
-        if(isMain){
-          w._winnerType = 'main';
-        } else if(w._winnerType !== 'main'){
-          w._winnerType = 'side';
-        }
-      });
+ws.forEach(function(w, k){
+  const gain = each + (k === 0 ? rem : 0);
+  w.chips += gain;
+  w._isWinner = true;
+  w._winAmount = (w._winAmount || 0) + gain;
+  w._winPots = w._winPots || [];
+
+  // ★ 关键改动：区分"真赢"和"未跟注返还"
+  const isRefund = (pot.eligible.length === 1);  // 单人池 = 未跟注返还
+  w._winPots.push({
+    label: lbl,
+    amount: gain,
+    isRefund: isRefund
+  });
+
+  if(isRefund){
+    // 未跟注返还：不亮杯
+    if(!w._winnerType) w._winnerType = 'refund';
+  } else {
+    // 真赢：主池 → main，其他 → side
+    if(isMain){
+      w._winnerType = 'main';
+    } else if(w._winnerType !== 'main'){
+      w._winnerType = 'side';
+    }
+  }
+});
 
       console.log('[resolveHost] Pot', i, lbl,
         '| amount:', pot.amount,
@@ -3037,9 +3065,10 @@ function render(){
     seat.classList.toggle("reveal", !!p.revealCards);
     seat.classList.toggle("empty", p.seated === false);
     seat.classList.toggle("intent-reveal", !!p._intentReveal);
-seat.classList.toggle("winner", !!p._isWinner && G.stage === 'showdown');
+seat.classList.toggle("winner", !!p._isWinner && G.stage === 'showdown' && p._winnerType !== 'refund');
 seat.classList.toggle("winner-main", p._winnerType === 'main' && G.stage === 'showdown');
 seat.classList.toggle("winner-side", p._winnerType === 'side' && G.stage === 'showdown');
+// ★ refund 类型不亮任何杯
     seat.classList.toggle("spectating", !!p._spectator);
     /* ★ 新增：All-in 玩家红色高亮 */updateSpectatorUI();
     seat.classList.toggle("all-in", !!p.allIn && !p.folded && p.seated !== false);
@@ -3220,17 +3249,27 @@ if(G.stage === 'showdown'){
   // ★ Showdown 时给每个座位飘 +N / −N 数字
 if(G.stage === 'showdown' && !G._deltaShown){
   G._deltaShown = true;
-  G.players.forEach(function(p){
-    if(p.seated === false) return;
-    let delta = 0;
-    if(p._isWinner && p._winAmount > 0){
+G.players.forEach(function(p){
+  if(p.seated === false) return;
+  let delta = 0;
+  let isRefund = false;
+  if(p._isWinner && p._winAmount > 0){
+    // 判断是否全部都是返还
+    const allRefund = p._winPots && p._winPots.length > 0 &&
+                     p._winPots.every(function(wp){ return wp.isRefund; });
+    if(allRefund){
       delta = p._winAmount;
-    } else if(!p.folded && p.totalContributed > 0){
-      delta = -p.totalContributed;
+      isRefund = true;
+    } else {
+      // 有真赢的部分，正常显示
+      delta = p._winAmount;
     }
-    if(delta === 0) return;
-    showSeatDelta(p.id, delta);
-  });
+  } else if(!p.folded && p.totalContributed > 0){
+    delta = -p.totalContributed;
+  }
+  if(delta === 0) return;
+  showSeatDelta(p.id, delta, isRefund);
+});
 } else if(G.stage !== 'showdown'){
   G._deltaShown = false;
 }
@@ -4395,12 +4434,16 @@ function showSettlementPanel(players){
     setTimeout(function(){ el.remove(); }, 400);
   }, 4000);
 }
-function showSeatDelta(seatId, delta){
+function showSeatDelta(seatId, delta, isRefund){
   const seat = document.querySelector('.seat[data-pid="' + seatId + '"]');
   if(!seat) return;
   const el = document.createElement('div');
-  el.className = 'seat-delta ' + (delta > 0 ? 'pos' : 'neg');
-  el.textContent = (delta > 0 ? '+' : '') + fmtNum(delta);
+  el.className = 'seat-delta ' + (isRefund ? 'refund' : (delta > 0 ? 'pos' : 'neg'));
+  if(isRefund){
+    el.textContent = '返还 +' + fmtNum(delta);
+  } else {
+    el.textContent = (delta > 0 ? '+' : '') + fmtNum(delta);
+  }
   seat.appendChild(el);
   setTimeout(function(){
     el.classList.add('fade');
