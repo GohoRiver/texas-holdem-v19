@@ -1942,8 +1942,15 @@ function handleOnlineMessage(msg){
     case 'full_state': applyFullState(msg.state); break;
     case 'player_leave': handlePlayerLeave(msg.peerId); break;
     case 'kicked': {
-      appToast(isEn() ? "You have been kicked" : "你已被房主踢出房间", "error");
-      try { PokerOnline.leaveRoom(); } catch(e){}   // ★ 加这一行
+      const reasons = {
+        bad_signature: isEn() ? 'Invalid signature — possible impersonation' : '签名无效（可能被冒充）',
+        verify_error: isEn() ? 'Signature verification failed' : '签名验证失败',
+        no_signature: isEn() ? 'Real-money room requires wallet signature' : '真金房必须连接钱包并签名',
+        peer_conflict: isEn() ? 'This ID is already used by another wallet' : '该 ID 已被其他钱包占用'
+      };
+      const msg = reasons[msg.reason] || (isEn() ? "You have been kicked" : "你已被房主踢出房间");
+      appToast(msg, "error");
+      try { PokerOnline.leaveRoom(); } catch(e){}
       G.online.active = false;
       resetSessionState(); resetTableDom(); hideWaitingBar();
       document.body.classList.remove('game-active');

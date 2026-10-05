@@ -515,6 +515,22 @@ async function getContractBalanceWei(){
     updateUI();
     return tx;
   }
+  /* ★ 新增：用当前钱包签名任意消息（用于联机防作弊） */
+async function signMessage(message){
+  if(!signer) throw new Error('钱包未连接');
+  if(!userAddress) throw new Error('钱包地址为空');
+  return await signer.signMessage(message);
+}
+
+/* ★ 新增：离线验证签名（不需要 signer，纯计算） */
+function verifyMessage(message, signature){
+  try {
+    return ethers.verifyMessage(message, signature);
+  } catch(e){
+    console.warn('verifyMessage failed', e);
+    return null;
+  }
+}
 
   function getBemBalance(){ return bemBalance; }
   function getContractBalance(){ return contractBalance; }
@@ -529,6 +545,8 @@ async function getContractBalanceWei(){
     depositBem,
     withdrawBem,
     settleBalanceOnChain,   // ★ 加上这行
+    signMessage,          // ★ 加
+  verifyMessage, 
     refreshBemBalance,
     refreshContractBalance,
     getContractBalanceWei,

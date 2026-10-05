@@ -153,10 +153,45 @@ Object.keys(roomPlayers).forEach(function(pid){
 
     channel = supabase.channel('room-' + roomId, { config: { broadcast: { self: true } } });
 
-        channel.on('broadcast', { event: 'player_join' }, (payload) => {
+            channel.on('broadcast', { event: 'player_join' }, (payload) => {
   if(!isHost) return;
   const p = payload.payload;
   if(!p || !p.peerId) return;
+
+  // ★ 验签逻辑
+  let verifiedAddress = null;
+  if(p.address && p.signature && p.message){
+    try {
+      const recovered = ethers.verifyMessage(p.message, p.signature);
+      if(!recovered || recovered.toLowerCase() !== p.address.toLowerCase()){
+        console.warn('[join] 签名与地址不匹配, peer:', p.peerId);
+        try { channel.send({ type:'broadcast', event:'kicked', payload:{ peerId: p.peerId, reason: 'bad_signature' } }); } catch(e){}
+        return;
+      }
+      verifiedAddress = p.address;
+    } catch(e){
+      console.error('[join] 验签异常', e);
+      try { channel.send({ type:'broadcast', event:'kicked', payload:{ peerId: p.peerId, reason: 'verify_error' } }); } catch(e){}
+      return;
+    }
+  }
+
+  // 真金房必须签名
+  if(roomInfo.mode === 'real' && !verifiedAddress){
+    console.warn('[join] 真金房未签名，踢出:', p.peerId);
+    try { channel.send({ type:'broadcast', event:'kicked', payload:{ peerId: p.peerId, reason: 'no_signature' } }); } catch(e){}
+    return;
+  }
+
+  // ★ 检查 peerId 是否已被别人占用（防止冒充）
+  if(roomPlayers[p.peerId] && roomPlayers[p.peerId].address){
+    if(verifiedAddress && roomPlayers[p.peerId].address.toLowerCase() !== verifiedAddress.toLowerCase()){
+      console.warn('[join] peerId 已被其他地址占用:', p.peerId);
+      try { channel.send({ type:'broadcast', event:'kicked', payload:{ peerId: p.peerId, reason: 'peer_conflict' } }); } catch(e){}
+      return;
+    }
+  }
+
   if(!roomPlayers[p.peerId]){
     if(Object.keys(roomPlayers).length >= MAX_SEATS){
       try { channel.send({ type:'broadcast', event:'room_full', payload:{ peerId: p.peerId } }); } catch(e){}
@@ -164,10 +199,11 @@ Object.keys(roomPlayers).forEach(function(pid){
     }
     roomPlayers[p.peerId] = {
       name: p.name || 'Player',
+      address: verifiedAddress,      // ★ 存地址
       ready: false,
       seat: nextFreeSeat(),
-      role: 'seated',          // ★ 补
-      wantsSeat: false,        // ★ 补
+      role: 'seated',
+      wantsSeat: false,
       isSelf: false
     };
     broadcastPlayerList(); notifyPlayers(); announceRoom();
@@ -178,6 +214,10 @@ Object.keys(roomPlayers).forEach(function(pid){
       seat: roomPlayers[p.peerId].seat
     });
   } else {
+    // 已存在，更新地址（防止之前没签名现在补上）
+    if(verifiedAddress && !roomPlayers[p.peerId].address){
+      roomPlayers[p.peerId].address = verifiedAddress;
+    }
     broadcastPlayerList();
   }
 });
@@ -326,6 +366,28 @@ hostAnnounceTimer = setInterval(function(){
       });
     });
   }
+  /* ★ 新增：生成进房签名 payload */
+async function buildJoinPayload(roomId, peerId){
+  const base = { peerId: peerId, name: nickname, password: roomInfo.password };
+  
+  // ★ 如果钱包连着，加签名；否则视情况决定是否允许进房
+  if(window.PokerWallet && PokerWallet.isConnected()){
+    try {
+      const address = PokerWallet.getAddress();
+      const message = 'Tapeout Bracelet Join\n' +
+                      'Room: ' + roomId + '\n' +
+                      'Peer: ' + peerId + '\n' +
+                      'Timestamp: ' + Date.now();
+      const signature = await PokerWallet.signMessage(message);
+      base.address = address;
+      base.message = message;
+      base.signature = signature;
+    } catch(e){
+      console.warn('[join] 签名失败', e);
+    }
+  }
+  return base;
+}
 
   function joinRoom(roomId, password){
     isHost = false;
@@ -358,7 +420,10 @@ hostAnnounceTimer = setInterval(function(){
     /* ★ 被踢 */
     channel.on('broadcast', { event: 'kicked' }, (payload) => {
       if(payload.payload.peerId === myId){
-        if(onMessage) onMessage({ type: 'kicked' });
+        if(onMessage) onMessage({ 
+          type: 'kicked', 
+          reason: payload.payload.reason || 'unknown' 
+        });
       }
     });
 
@@ -420,13 +485,24 @@ hostAnnounceTimer = setInterval(function(){
     });
 
     return new Promise(function(resolve){
-      channel.subscribe(function(status){
+      channel.subscribe(async function(status){
         if(status === 'SUBSCRIBED'){
+          // ★ 首次进房先签名一次
+          let joinPayload;
+          try {
+            joinPayload = await buildJoinPayload(roomId, myId);
+          } catch(e){
+            console.error('[join] buildJoinPayload failed', e);
+            joinPayload = { peerId: myId, name: nickname, password: roomInfo.password };
+          }
+          
+          // 广播 3 次（防止丢包），但签名消息复用，Timestamp 是旧的也无所谓
           for(let i = 0; i < 3; i++){
             setTimeout(function(){
-              send('player_join', { peerId: myId, name: nickname, password: roomInfo.password });
+              send('player_join', joinPayload);
             }, i * 300);
           }
+          
           heartbeatTimer = setInterval(function(){
             if(!channel) return;
             send('sync_request', { peerId: myId });
