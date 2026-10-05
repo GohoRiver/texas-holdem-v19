@@ -3251,3 +3251,25 @@ body.is-mobile.orientation-landscape .settlement-panel{
   font-size: 15px;
   font-weight: 700;
 }
+
+/* ★ 签名中提示 */
+.signing-hint{
+  position: fixed;
+  left: 50%; top: 80px;
+  transform: translateX(-50%) translateY(-10px);
+  padding: 10px 20px;
+  background: rgba(20,26,38,.98);
+  border: 1px solid var(--gold);
+  border-radius: 10px;
+  color: var(--gold);
+  font-size: 13px; font-weight: 700;
+  z-index: 9999;
+  box-shadow: 0 4px 20px rgba(0,0,0,.6), 0 0 12px rgba(251,191,36,.3);
+  opacity: 0;
+  transition: opacity .25s, transform .25s;
+  pointer-events: none;
+}
+.signing-hint.show{
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}

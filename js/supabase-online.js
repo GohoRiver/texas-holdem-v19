@@ -540,6 +540,122 @@ async function buildJoinPayload(roomId, peerId){
 
   function sendFullState(state){ send('full_state', state); }
   function sendPlayerAction(payload){ send('player_action', payload); }
+  /* ★ 新增：动作签名相关 */
+let _lastSeqByPeer = {};   // { peerId: lastAcceptedSeq }
+
+/* 把 payload 规范化成字符串（双方必须用完全相同的算法） */
+function buildActionMessage(payload){
+  return [
+    'Tapeout Bracelet Action v1',
+    'Room: ' + (currentRoomId || ''),
+    'Peer: ' + (payload.playerId || ''),
+    'Address: ' + (payload.address || ''),
+    'Hand: ' + (payload.handNumber != null ? payload.handNumber : ''),
+    'Stage: ' + (payload.stage || ''),
+    'Seq: ' + (payload.seq != null ? payload.seq : ''),
+    'Action: ' + ((payload.action && payload.action.type) || ''),
+    'Amount: ' + ((payload.action && payload.action.amount != null) ? payload.action.amount : ''),
+    'Target: ' + ((payload.action && payload.action.target != null) ? payload.action.target : ''),
+    'Timestamp: ' + (payload.timestamp != null ? payload.timestamp : '')
+  ].join('\n');
+}
+
+/* 玩家端：签名后发送动作 */
+async function sendPlayerActionSigned(payload){
+  // 未连钱包 → 降级为普通发送（积分场允许）
+  if(!window.PokerWallet || !PokerWallet.isConnected()){
+    payload._unsigned = true;
+    send('player_action', payload);
+    return;
+  }
+  try {
+    const address = PokerWallet.getAddress();
+    const timestamp = Date.now();
+    // ★ 用时间戳作为 seq，跨标签页也单调
+    const seq = Math.max((window._lastActionSeq || 0) + 1, timestamp);
+    window._lastActionSeq = seq;
+
+    payload.address = address;
+    payload.timestamp = timestamp;
+    payload.seq = seq;
+    payload._unsigned = false;
+
+    const message = buildActionMessage(payload);
+    const signature = await PokerWallet.signMessage(message);
+
+    payload.message = message;
+    payload.signature = signature;
+    send('player_action', payload);
+  } catch(e){
+    console.error('[action] sign failed, falling back', e);
+    payload._unsigned = true;
+    send('player_action', payload);
+  }
+}
+
+/* 房主端：验证动作签名，返回 { valid, address, reason } */
+function verifyActionSignature(msg){
+  if(!msg || !msg.playerId || !msg.action){
+    return { valid: false, reason: 'missing_fields' };
+  }
+  const rp = roomPlayers[msg.playerId];
+  if(!rp) return { valid: false, reason: 'unknown_peer' };
+
+  // 玩家没有绑定地址（未签名玩家）
+  if(!rp.address){
+    if(roomInfo.mode === 'real'){
+      return { valid: false, reason: 'real_room_requires_signature' };
+    }
+    // 积分场：允许未签名
+    return { valid: true, address: null };
+  }
+
+  // 玩家有绑定地址 → 必须签名
+  if(!msg.signature || !msg.message || !msg.address){
+    return { valid: false, reason: 'missing_signature' };
+  }
+  if(msg.address.toLowerCase() !== rp.address.toLowerCase()){
+    return { valid: false, reason: 'address_mismatch' };
+  }
+
+  // 验签
+  let recovered;
+  try {
+    recovered = ethers.verifyMessage(msg.message, msg.signature);
+  } catch(e){
+    return { valid: false, reason: 'verify_error' };
+  }
+  if(!recovered || recovered.toLowerCase() !== rp.address.toLowerCase()){
+    return { valid: false, reason: 'bad_signature' };
+  }
+
+  // 消息内容重建对比（防止攻击者改字段）
+  const rebuilt = buildActionMessage(msg);
+  if(rebuilt !== msg.message){
+    return { valid: false, reason: 'message_tampered' };
+  }
+
+  // 时间戳时效（60s 内）
+  const now = Date.now();
+  if(!msg.timestamp || Math.abs(now - msg.timestamp) > 60000){
+    return { valid: false, reason: 'timestamp_expired' };
+  }
+
+  // Seq 单调递增（防重放）
+  const lastSeq = _lastSeqByPeer[msg.playerId] || 0;
+  if(msg.seq <= lastSeq){
+    return { valid: false, reason: 'seq_replay' };
+  }
+
+  // 全部通过
+  _lastSeqByPeer[msg.playerId] = msg.seq;
+  return { valid: true, address: recovered };
+}
+
+/* 清空 seq 记录（换房/离房时调用） */
+function resetActionSeq(){
+  _lastSeqByPeer = {};
+}
   function sendGameStart(payload){
     for(let i = 0; i < 3; i++){ setTimeout(function(){ send('game_start', payload); }, i * 300); }
     send('game_start', payload);
@@ -605,7 +721,7 @@ async function buildJoinPayload(roomId, peerId){
     delete lobbyRooms[leavingRoomId];
     if(onRoomsUpdate) onRoomsUpdate(getKnownRooms());
   }
-
+resetActionSeq();
   currentRoomId = null; isHost = false; roomPlayers = {}; hostPeerId = null;
 }
 
@@ -624,6 +740,10 @@ async function buildJoinPayload(roomId, peerId){
     getRoomPlayers: function(){ return roomPlayers; },
     getRoomInfo: function(){ return roomInfo; },
     getHostPeerId: function(){ return hostPeerId; },
-    getKnownRooms, isHost: function(){ return isHost; }
+    getKnownRooms, isHost: function(){ return isHost; },
+    sendPlayerActionSigned,    // ★ 新增
+  verifyActionSignature,     // ★ 新增
+  resetActionSeq             // ★ 新增
+
   };
 })();

@@ -1879,8 +1879,29 @@ function handleOnlineMessage(msg){
       case 'host_start_game': hostStartGame(msg.playerOrder, msg.players); break;
       case 'player_action': {
         const player = G.players.find(function(p){ return p.peerId === msg.playerId; });
-        if(!player) return;
-        if(G.players[G.currentPlayerIndex] !== player) return;
+        if(!player) {
+          console.warn('[host] player_action: unknown peer', msg.playerId);
+          return;
+        }
+        if(G.players[G.currentPlayerIndex] !== player) {
+          console.warn('[host] player_action: not current turn', msg.playerId);
+          return;
+        }
+
+        // ★ 验签（真金房强制，积分场可选）
+        const v = PokerOnline.verifyActionSignature(msg);
+        if(!v.valid){
+          console.warn('[host] 动作验签失败:', v.reason, msg.playerId);
+          // 严重违规（伪造签名 / 地址不匹配）→ 踢出
+          if(v.reason === 'bad_signature' ||
+             v.reason === 'address_mismatch' ||
+             v.reason === 'message_tampered'){
+            log((player.name || 'Player') + (isEn() ? ' — invalid signature, kicked' : ' — 签名无效，已踢出'), 'hl');
+            PokerOnline.sendKick(msg.playerId);
+          }
+          return;
+        }
+
         clearHostTimeout();
         executeAction(player, msg.action);
         render();
@@ -3760,7 +3781,20 @@ function doHumanAction(action){
   }
   /* raise 音效由 executeAction 内部选择 */
   if(G.online.active && !G.online.isHost){
-    PokerOnline.sendPlayerAction({ playerId: PokerOnline.getMyId(), action: action });
+    // ★ 显示"签名中"提示
+    showSigningHint(true);
+    const payload = {
+      playerId: PokerOnline.getMyId(),
+      action: action,
+      handNumber: G.handNumber,
+      stage: G.stage
+    };
+    PokerOnline.sendPlayerActionSigned(payload).then(function(){
+      showSigningHint(false);
+    }).catch(function(err){
+      console.error('[doHumanAction] sign failed', err);
+      showSigningHint(false);
+    });
     return;
   }
   executeAction(me, action);
@@ -4456,5 +4490,24 @@ function showSeatDelta(seatId, delta, isRefund){
     el.classList.add('fade');
     setTimeout(function(){ el.remove(); }, 400);
   }, 2200);
+}
+/* ★ 签名中提示（防止玩家以为卡住） */
+function showSigningHint(show){
+  let el = document.getElementById('signingHint');
+  if(show){
+    if(!el){
+      el = document.createElement('div');
+      el.id = 'signingHint';
+      el.className = 'signing-hint';
+      el.textContent = (isEn() ? '✍️ Signing action...' : '✍️ 正在签名...');
+      document.body.appendChild(el);
+    }
+    el.classList.add('show');
+  } else {
+    if(el){
+      el.classList.remove('show');
+      setTimeout(function(){ if(el.parentNode) el.remove(); }, 300);
+    }
+  }
 }
 })();
