@@ -820,13 +820,17 @@ function resetActionSeq(){
     let sent;
     try {
       if(wasHost){
-        // ★ 房主离桌 → 优先转让给其他玩家
         const others = Object.keys(roomPlayers).filter(function(pid){
           return pid !== myId && roomPlayers[pid].role === 'seated';
         });
         if(others.length > 0){
           console.log('[leaveRoom] 转让房主给:', others[0]);
-          sent = ch.send({ type: 'broadcast', event: 'transfer_host', payload: { peerId: others[0] } });
+          // ★ 直接发 host_transferred，让客户端能收到
+          sent = ch.send({
+            type: 'broadcast',
+            event: 'host_transferred',
+            payload: { newHostPeerId: others[0], oldHostPeerId: myId }
+          });
         } else {
           sent = ch.send({ type: 'broadcast', event: 'host_left', payload: { peerId: myId } });
         }

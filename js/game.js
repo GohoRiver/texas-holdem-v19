@@ -720,6 +720,7 @@ function checkRosterSync(){
     if(!rp || rp.role !== 'seated') leftPeers.push(p.peerId);
   });
   if(!leftPeers.length) return false;
+  let currentLeft = false;
   leftPeers.forEach(function(peerId){
     const idx = G.players.findIndex(function(p){ return p.peerId === peerId; });
     if(idx < 0) return;
@@ -732,9 +733,18 @@ function checkRosterSync(){
     if(G.currentPlayerIndex === idx){
       stopTurnTimer();
       clearHostTimeout();
+      currentLeft = true;
     }
   });
   render();
+  // ★ 关键：如果离桌的就是当前行动者，立即推进（不用等 30s）
+  if(currentLeft){
+    setTimeout(function(){
+      if(G.online.isHost && !G.gameOver && G.stage !== 'showdown' && G.stage !== 'waiting'){
+        try { runHostTurn(); } catch(e){ console.error('[checkRosterSync] runHostTurn', e); }
+      }
+    }, 100);
+  }
   return true;
 }
 function handlePlayerLeave(peerId){
@@ -1731,6 +1741,33 @@ function endHandHost(totalPot){
   render();
   if(G.online.isHost) broadcastFullState();
   offerShowCards();
+
+  // ★ 新增 1：自己筹码见底 → 弹补码
+  if(me && me.chips <= 0){
+    setTimeout(showRebuy, 800);
+    return;
+  }
+
+  // ★ 新增 2：只剩 <2 个有筹码玩家 → 回等待室
+  const withChips = G.players.filter(function(p){
+    return p.seated !== false && p.chips > 0;
+  });
+  if(withChips.length < 2){
+    log(isEn() ? "Only one player has chips — waiting for rebuy" : "只剩一个有筹码的玩家 —— 等待补码", "hl");
+    setTimeout(function(){
+      if(G.online.isHost){
+        returnToWaiting();
+      } else {
+        G.stage = 'waiting';
+        G.online.started = false;
+        hideHumanActions();
+        showWaitingBar();
+        render();
+      }
+    }, 2500);
+    return;
+  }
+
   beginNextHandCountdown(startNewHandHost);
 }
 
@@ -1846,10 +1883,17 @@ function applyFullState(state){
     p.chips = sp.chips; p.folded = sp.folded; p.allIn = sp.allIn;
     p.seated = sp.seated !== false;
     p.currentBet = sp.currentBet;
-        // ★ 阶段2b：不要覆盖自己已经本地解密的牌
+     // ★ 阶段2b：保护自己的牌
     const isSelf = (i === G.online.mySeat);
+    const myId0 = window.PokerOnline ? PokerOnline.getMyId() : null;
     if(isSelf && p.holeCards && p.holeCards.length === 2){
-      // 保留本地解密结果（房主不知道我的牌，不能覆盖）
+      // 保留本地解密结果
+    } else if(isSelf && myId0 && G._pendingHoleCards && G._pendingHoleCards[myId0] && G._pendingHoleCards[myId0].length === 2){
+      // 从 pending 里救回来
+      p.holeCards = normalizeCards(G._pendingHoleCards[myId0]);
+      G._currentHandMyCards = G._pendingHoleCards[myId0].map(function(c){ return c.suit + c.rank; });
+      delete G._pendingHoleCards[myId0];
+      G._lastHandSig = '';
     } else {
       p.holeCards = normalizeCards(sp.holeCards);
     }
@@ -2159,6 +2203,16 @@ function handleOnlineMessage(msg){
     }
     case 'host_changed': {
       updateSpectatorUI();
+      // ★ 房主变更 → 游戏状态必须重置，不然会卡在局内
+      if(G.stage !== 'waiting' && G.online.started){
+        appToast(isEn() ? "Host changed — game paused" : "房主已变更 —— 对局已暂停", "error");
+        G.stage = 'waiting';
+        G.online.started = false;
+        hideHumanActions();
+        stopTurnTimer();
+        showWaitingBar();
+        render();
+      }
       break;
     }
     case 'host_left': {
@@ -2166,7 +2220,7 @@ function handleOnlineMessage(msg){
       const myId = PokerOnline.getMyId();
       const others = Object.keys(players).filter(function(pid){ return pid !== myId; });
       if(others.length === 0){
-        // 房间空了 → 退出
+        // 房间空了
         appToast(isEn() ? "Room closed" : "房间已关闭", "error");
         try { PokerOnline.leaveRoom(); } catch(e){}
         G.online.active = false;
@@ -2177,11 +2231,11 @@ function handleOnlineMessage(msg){
         showScreen("lobby");
         renderRoomLists();
       } else {
-        // ★ 还有人 → 切回等待，让用户决定去留
         appToast(isEn() ? "Host left, waiting for new host..." : "房主已离桌，等待新房主…", "error");
         G.stage = 'waiting';
         G.online.started = false;
         hideHumanActions();
+        stopTurnTimer();
         showWaitingBar();
         render();
       }
@@ -3524,32 +3578,38 @@ function renderWaitingTable(container){
 function tryApplyPendingHoles(){
   if(!G._pendingHoleCards) return false;
   let applied = false;
+  const myId = window.PokerOnline ? PokerOnline.getMyId() : null;
   for(const peerId in G._pendingHoleCards){
     const cards = G._pendingHoleCards[peerId];
     if(!cards || cards.length !== 2) continue;
     const idx = G.players.findIndex(function(p){ return p.peerId === peerId; });
     if(idx >= 0){
       const p = G.players[idx];
-      if(!p.holeCards || p.holeCards.length < 2){
+      const needWrite = !p.holeCards || p.holeCards.length < 2;
+      if(needWrite){
         p.holeCards = normalizeCards(cards);
         applied = true;
         console.log('[pending] 已填入底牌:', peerId, cards.map(function(c){return c.rank+c.suit;}).join(' '));
-        // ★ 关键：不管 mySeat 之前是多少，如果是自己的牌，强制设置
-        const myId = window.PokerOnline ? PokerOnline.getMyId() : null;
-        if(peerId === myId){
+      }
+      // ★ 无论是否写入，只要是自己就强制修 mySeat
+      if(peerId === myId){
+        if(G.online.mySeat !== idx){
           G.online.mySeat = idx;
-          G._currentHandMyCards = cards.map(function(c){ return c.suit + c.rank; });
           console.log('[pending] 强制设置 mySeat =', idx);
         }
+        G._currentHandMyCards = cards.map(function(c){ return c.suit + c.rank; });
       }
-      delete G._pendingHoleCards[peerId];
+      // ★ 只有真正写入才删缓存；否则保留（防后续被 full_state 覆盖）
+      if(needWrite){
+        delete G._pendingHoleCards[peerId];
+      }
     } else {
       console.log('[pending] 玩家未就位，继续缓存:', peerId);
     }
   }
   if(applied){
-    G._lastHandSig = '';   // ★ 清缓存，强制重渲染手牌
-    G._lastStateSig = '';  // ★ 也清 state 缓存
+    G._lastHandSig = '';
+    G._lastStateSig = '';
   }
   return applied;
 }
@@ -4332,6 +4392,10 @@ document.addEventListener("DOMContentLoaded", function(){
         updateWaitingBar();
         if(G.online.active && (G.stage === 'waiting' || !G.online.started)){
           syncWaitingSeatsFromRoom();
+        }
+        // ★ 新增：房主在局中时，检测离桌并立即推进
+        if(G.online.active && G.online.isHost && G.online.started && G.stage !== 'waiting'){
+          checkRosterSync();
         }
         updateSpectatorUI();
         renderPlayersList();
