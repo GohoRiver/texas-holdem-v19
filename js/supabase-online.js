@@ -29,21 +29,30 @@ async function upsertMyPubkey(roomId, peerId){
     const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     const pubkeyStr = JSON.stringify(pubJwk);
 
-    // ① 先尝试 UPDATE
-    const { data: updated, error: updateErr } = await sb
+    // ★ 先 SELECT 检查行是否存在（避免 409）
+    const { data: existing, error: selErr } = await sb
       .from('room_players')
-      .update({ name: nickname, pubkey: pubkeyStr })
+      .select('peer_id, pubkey')
       .eq('room_id', roomId)
       .eq('peer_id', peerId)
-      .select();
+      .maybeSingle();
 
-    if(updateErr){
-      console.warn('[pubkey] update 失败', updateErr);
+    if(selErr){
+      console.warn('[pubkey] select 失败', selErr);
     }
 
-    // ② 如果没找到行，才 INSERT
-    if(!updated || updated.length === 0){
-      const { error: insertErr } = await sb
+    if(existing){
+      // 行存在 → UPDATE
+      const { error: updErr } = await sb
+        .from('room_players')
+        .update({ name: nickname, pubkey: pubkeyStr })
+        .eq('room_id', roomId)
+        .eq('peer_id', peerId);
+      if(updErr) console.warn('[pubkey] update 失败', updErr);
+      else console.log('[pubkey] 已更新:', roomId, peerId);
+    } else {
+      // 行不存在 → INSERT
+      const { error: insErr } = await sb
         .from('room_players')
         .insert({
           room_id: roomId,
@@ -53,10 +62,8 @@ async function upsertMyPubkey(roomId, peerId){
           seat: 0,
           chips: 10000
         });
-      if(insertErr) console.warn('[pubkey] insert 失败', insertErr);
-      else console.log('[pubkey] 已写入数据库:', roomId, peerId);
-    } else {
-      console.log('[pubkey] 已更新数据库:', roomId, peerId);
+      if(insErr) console.warn('[pubkey] insert 失败', insErr);
+      else console.log('[pubkey] 已插入:', roomId, peerId);
     }
   } catch(e){
     console.warn('[pubkey] 异常', e);
