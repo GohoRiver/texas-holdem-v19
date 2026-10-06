@@ -1360,10 +1360,8 @@ async function startNewHandHost(){
   }
 
   // ★ 本地 fallback（服务器不通时用，会暴露底牌但至少能玩）
-  G.deck = PokerDeck.create();
-  if(!dealResult){
-    PokerDeck.shuffle(G.deck);
-  }
+G.deck = PokerDeck.create();
+PokerDeck.shuffle(G.deck);   // ★ 无论如何都洗（公共牌用）
   G._renderedCards = new WeakSet();
   G._lastBoardSig = ''; G._lastHandSig = ''; G._lastActionSig = '';
   stopTurnTimer();
@@ -3383,7 +3381,7 @@ seat.classList.toggle("winner-side", p._winnerType === 'side' && G.stage === 'sh
   const bc = $("boardCards");
   if(bc){
     const hlSet = new Set();
-    G.players.forEach(function(p){p._isWinner = false; if(p._highlight) p._highlight.forEach(function(c){ hlSet.add(c); }); });
+    G.players.forEach(function(p){ if(p._highlight) p._highlight.forEach(function(c){ hlSet.add(c); }); });
     const boardSig = cardsSig(G.community) + '|' + G.community.map(function(c){ return hlSet.has(c) ? 1 : 0; }).join('');
     if(G._lastBoardSig !== boardSig){
       G._lastBoardSig = boardSig;
@@ -3536,11 +3534,12 @@ function tryApplyPendingHoles(){
         p.holeCards = normalizeCards(cards);
         applied = true;
         console.log('[pending] 已填入底牌:', peerId, cards.map(function(c){return c.rank+c.suit;}).join(' '));
-               // ★ 关键：如果是自己的牌，强制设置 mySeat
+        // ★ 关键：不管 mySeat 之前是多少，如果是自己的牌，强制设置
         const myId = window.PokerOnline ? PokerOnline.getMyId() : null;
         if(peerId === myId){
           G.online.mySeat = idx;
           G._currentHandMyCards = cards.map(function(c){ return c.suit + c.rank; });
+          console.log('[pending] 强制设置 mySeat =', idx);
         }
       }
       delete G._pendingHoleCards[peerId];
