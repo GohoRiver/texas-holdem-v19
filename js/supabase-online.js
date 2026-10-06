@@ -18,6 +18,29 @@ window.PokerOnline = (function(){
   let heartbeatTimer = null;
 
   let lobbyChannel = null;
+  /* ★ 阶段2a：把玩家公钥写入数据库 */
+async function upsertMyPubkey(roomId, peerId){
+  if(!window.PokerCrypto) {
+    console.warn('[pubkey] PokerCrypto 未加载');
+    return;
+  }
+  try {
+    const pubJwk = await PokerCrypto.ensureKeyPair(roomId);
+    const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const { error } = await sb.from('room_players').upsert({
+      room_id: roomId,
+      peer_id: peerId,
+      name: nickname,
+      pubkey: JSON.stringify(pubJwk),
+      seat: 0,
+      chips: 10000
+    }, { onConflict: 'room_id,peer_id' });
+    if(error) console.warn('[pubkey] upsert 失败', error);
+    else console.log('[pubkey] 已写入数据库:', roomId, peerId);
+  } catch(e){
+    console.warn('[pubkey] 异常', e);
+  }
+}
   let lobbyRooms = {};
   let hostRoomInfo = null;
   let hostAnnounceTimer = null;
@@ -110,9 +133,13 @@ Object.keys(roomPlayers).forEach(function(pid){
     if(!isHost) return;
     const list = Object.keys(roomPlayers).map(function(pid){
       const p = roomPlayers[pid];
-      return { peerId: pid, name: p.name, ready: p.ready, seat: p.seat, role: p.role, wantsSeat: p.wantsSeat };
+      return {
+        peerId: pid, name: p.name, ready: p.ready,
+        seat: p.seat, role: p.role, wantsSeat: p.wantsSeat,
+        address: p.address || null,      // ★ 加
+        pubkey: p.pubkey || null         // ★ 加
+      };
     });
-    send('player_list', { players: list, hostPeerId: hostPeerId, isPrivate: roomInfo.isPrivate, gameStarted: roomInfo.gameStarted });
   }
 
   function notifyPlayers(){
@@ -200,6 +227,7 @@ Object.keys(roomPlayers).forEach(function(pid){
     roomPlayers[p.peerId] = {
       name: p.name || 'Player',
       address: verifiedAddress,      // ★ 存地址
+      pubkey: p.pubkey || null, 
       ready: false,
       seat: nextFreeSeat(),
       role: 'seated',
@@ -346,7 +374,7 @@ channel.on('broadcast', { event: 'sync_request' }, (payload) => {
       isPrivate: roomInfo.isPrivate, gameStarted: false
     };
 
-    return new Promise(function(resolve){
+        return new Promise(function(resolve){
       channel.subscribe(function(status){
         if(status === 'SUBSCRIBED'){
           roomPlayers[myId] = {
@@ -356,12 +384,18 @@ channel.on('broadcast', { event: 'sync_request' }, (payload) => {
           broadcastPlayerList();
           notifyPlayers();
           announceRoom();
-if(hostAnnounceTimer) clearInterval(hostAnnounceTimer);
-hostAnnounceTimer = setInterval(function(){
-  announceRoom();
-  broadcastPlayerList();       // ★ 每 2 秒兜底一次
-}, ANNOUNCE_MS);
+          if(hostAnnounceTimer) clearInterval(hostAnnounceTimer);
+          hostAnnounceTimer = setInterval(function(){
+            announceRoom();
+            broadcastPlayerList();
+          }, ANNOUNCE_MS);
           resolve();
+
+          // ★ 阶段2a：异步生成密钥 + 写入数据库
+          (async function(){
+            try { await upsertMyPubkey(roomId, myId); }
+            catch(e){ console.warn('[createRoom] pubkey 写入失败', e); }
+          })();
         }
       });
     });
@@ -402,6 +436,8 @@ async function buildJoinPayload(roomId, peerId){
         roomPlayers[p.peerId] = {
           name: p.name, ready: p.ready, seat: p.seat,
           role: p.role || 'seated', wantsSeat: !!p.wantsSeat,
+          address: p.address || null,     // ★ 加
+          pubkey: p.pubkey || null,       // ★ 加
           isSelf: p.peerId === myId
         };
       });
@@ -484,10 +520,14 @@ async function buildJoinPayload(roomId, peerId){
       if(onMessage) onMessage({ type: 'show_cards', ...payload.payload });
     });
 
-    return new Promise(function(resolve){
+        return new Promise(function(resolve){
       channel.subscribe(async function(status){
         if(status === 'SUBSCRIBED'){
-          // ★ 首次进房先签名一次
+          // ★ 阶段2a：先写入公钥到数据库
+          try { await upsertMyPubkey(roomId, myId); }
+          catch(e){ console.warn('[joinRoom] pubkey 写入失败', e); }
+
+          // 首次进房先签名一次
           let joinPayload;
           try {
             joinPayload = await buildJoinPayload(roomId, myId);
@@ -495,14 +535,14 @@ async function buildJoinPayload(roomId, peerId){
             console.error('[join] buildJoinPayload failed', e);
             joinPayload = { peerId: myId, name: nickname, password: roomInfo.password };
           }
-          
-          // 广播 3 次（防止丢包），但签名消息复用，Timestamp 是旧的也无所谓
+
+          // 广播 3 次（防止丢包）
           for(let i = 0; i < 3; i++){
             setTimeout(function(){
               send('player_join', joinPayload);
             }, i * 300);
           }
-          
+
           heartbeatTimer = setInterval(function(){
             if(!channel) return;
             send('sync_request', { peerId: myId });
@@ -527,7 +567,11 @@ async function buildJoinPayload(roomId, peerId){
       type: 'host_start_game',
       playerOrder: order,
       players: order.map(function(pid){
-        return { peerId: pid, name: roomPlayers[pid].name, seat: roomPlayers[pid].seat };
+        return {
+          peerId: pid, name: roomPlayers[pid].name, seat: roomPlayers[pid].seat,
+          address: roomPlayers[pid].address || null,   // ★ 加
+          pubkey: roomPlayers[pid].pubkey || null       // ★ 加
+        };
       })
     });
   }
