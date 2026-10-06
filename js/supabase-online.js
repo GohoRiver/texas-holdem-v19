@@ -27,16 +27,37 @@ async function upsertMyPubkey(roomId, peerId){
   try {
     const pubJwk = await PokerCrypto.ensureKeyPair(roomId);
     const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    const { error } = await sb.from('room_players').upsert({
-      room_id: roomId,
-      peer_id: peerId,
-      name: nickname,
-      pubkey: JSON.stringify(pubJwk),
-      seat: 0,
-      chips: 10000
-    }, { onConflict: 'room_id,peer_id' });
-    if(error) console.warn('[pubkey] upsert 失败', error);
-    else console.log('[pubkey] 已写入数据库:', roomId, peerId);
+    const pubkeyStr = JSON.stringify(pubJwk);
+
+    // ① 先尝试 UPDATE
+    const { data: updated, error: updateErr } = await sb
+      .from('room_players')
+      .update({ name: nickname, pubkey: pubkeyStr })
+      .eq('room_id', roomId)
+      .eq('peer_id', peerId)
+      .select();
+
+    if(updateErr){
+      console.warn('[pubkey] update 失败', updateErr);
+    }
+
+    // ② 如果没找到行，才 INSERT
+    if(!updated || updated.length === 0){
+      const { error: insertErr } = await sb
+        .from('room_players')
+        .insert({
+          room_id: roomId,
+          peer_id: peerId,
+          name: nickname,
+          pubkey: pubkeyStr,
+          seat: 0,
+          chips: 10000
+        });
+      if(insertErr) console.warn('[pubkey] insert 失败', insertErr);
+      else console.log('[pubkey] 已写入数据库:', roomId, peerId);
+    } else {
+      console.log('[pubkey] 已更新数据库:', roomId, peerId);
+    }
   } catch(e){
     console.warn('[pubkey] 异常', e);
   }
@@ -129,18 +150,19 @@ Object.keys(roomPlayers).forEach(function(pid){
     return -1;
   }
 
-  function broadcastPlayerList(){
-    if(!isHost) return;
-    const list = Object.keys(roomPlayers).map(function(pid){
-      const p = roomPlayers[pid];
-      return {
-        peerId: pid, name: p.name, ready: p.ready,
-        seat: p.seat, role: p.role, wantsSeat: p.wantsSeat,
-        address: p.address || null,      // ★ 加
-        pubkey: p.pubkey || null         // ★ 加
-      };
-    });
-  }
+function broadcastPlayerList(){
+  if(!isHost) return;
+  const list = Object.keys(roomPlayers).map(function(pid){
+    const p = roomPlayers[pid];
+    return {
+      peerId: pid, name: p.name, ready: p.ready,
+      seat: p.seat, role: p.role, wantsSeat: p.wantsSeat,
+      address: p.address || null,
+      pubkey: p.pubkey || null
+    };
+  });
+  send('player_list', { players: list, hostPeerId: hostPeerId, isPrivate: roomInfo.isPrivate, gameStarted: roomInfo.gameStarted });
+}
 
   function notifyPlayers(){
     if(onPlayersUpdate) onPlayersUpdate(Object.keys(roomPlayers).map(function(pid){
@@ -436,14 +458,15 @@ async function buildJoinPayload(roomId, peerId){
         roomPlayers[p.peerId] = {
           name: p.name, ready: p.ready, seat: p.seat,
           role: p.role || 'seated', wantsSeat: !!p.wantsSeat,
-          address: p.address || null,     // ★ 加
-          pubkey: p.pubkey || null,       // ★ 加
+          address: p.address || null,
+          pubkey: p.pubkey || null,
           isSelf: p.peerId === myId
         };
       });
       hostPeerId = payload.payload.hostPeerId || null;
       roomInfo.isPrivate = !!payload.payload.isPrivate;
       roomInfo.gameStarted = !!payload.payload.gameStarted;
+      console.log('[client] 收到 player_list:', Object.keys(roomPlayers).length, '个玩家');
       notifyPlayers();
     });
 
@@ -542,6 +565,14 @@ async function buildJoinPayload(roomId, peerId){
               send('player_join', joinPayload);
             }, i * 300);
           }
+
+          // ★ 关键修复：加入后立即请求一次同步，不用等 12 秒
+          setTimeout(function(){
+            send('sync_request', { peerId: myId });
+          }, 800);
+          setTimeout(function(){
+            send('sync_request', { peerId: myId });
+          }, 2000);
 
           heartbeatTimer = setInterval(function(){
             if(!channel) return;
