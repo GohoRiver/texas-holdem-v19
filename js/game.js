@@ -29,6 +29,7 @@ const G = {
   _spectatorMode: false,
   _pendingSeat: false,
   _waitingSeats: {},
+  _pendingHoleCards: {},   // ★ 新增：临时缓存解密的底牌，等玩家就位后填入
   /* ★ 新增：本轮加注次数，用于 3-bet / 4-bet 显示 */
   raiseCount: 0
 };
@@ -1861,6 +1862,9 @@ function applyFullState(state){
   }
   updateSpectatorUI();
 
+  // ★ 阶段2b：full_state 到了之后，尝试填入之前缓存的底牌
+  tryApplyPendingHoles();
+
   render();
 
   if((G.stage === 'showdown' || (state.nextHandEndsAt && state.nextHandEndsAt > Date.now())) && !G.gameOver){
@@ -1947,14 +1951,16 @@ function handleOnlineMessage(msg){
       }
       try {
         const cards = await PokerCrypto.decryptHoleCards(myHole);
-        const mySeat = G.players.findIndex(function(p){ return p.peerId === myPeerId; });
-        if(mySeat >= 0){
-          G.players[mySeat].holeCards = normalizeCards(cards);
-          if(G.online.mySeat === mySeat){
-            G._currentHandMyCards = cards.map(function(c){ return c.suit + c.rank; });
-          }
-          console.log('[deal_holes] 我的底牌:', cards.map(function(c){return c.rank+c.suit;}).join(' '));
+
+        // ★ 关键：不管玩家有没有就位，先缓存
+        if(!G._pendingHoleCards) G._pendingHoleCards = {};
+        G._pendingHoleCards[myPeerId] = cards;
+
+        // 尝试立即填入（如果 G.players 已就绪）
+        if(tryApplyPendingHoles()){
           render();
+        } else {
+          console.log('[deal_holes] 玩家还未就位，已缓存，等待 full_state');
         }
       } catch(e){
         console.error('[deal_holes] 解密失败', e);
@@ -3476,6 +3482,35 @@ function renderWaitingTable(container){
     container.appendChild(seat);
   }
 }
+/* ★ 阶段2b：把缓存的底牌填入玩家 */
+function tryApplyPendingHoles(){
+  if(!G._pendingHoleCards) return false;
+  let applied = false;
+  for(const peerId in G._pendingHoleCards){
+    const cards = G._pendingHoleCards[peerId];
+    if(!cards || cards.length !== 2) continue;
+    const idx = G.players.findIndex(function(p){ return p.peerId === peerId; });
+    if(idx >= 0){
+      const p = G.players[idx];
+      if(!p.holeCards || p.holeCards.length < 2){
+        p.holeCards = normalizeCards(cards);
+        applied = true;
+        console.log('[pending] 已填入底牌:', peerId, cards.map(function(c){return c.rank+c.suit;}).join(' '));
+        if(G.online.mySeat === idx){
+          G._currentHandMyCards = cards.map(function(c){ return c.suit + c.rank; });
+        }
+      }
+      delete G._pendingHoleCards[peerId];
+    } else {
+      console.log('[pending] 玩家未就位，继续缓存:', peerId);
+    }
+  }
+  if(applied){
+    G._lastHandSig = '';   // ★ 清缓存，强制重渲染手牌
+    G._lastStateSig = '';  // ★ 也清 state 缓存
+  }
+  return applied;
+}
 
 function renderHumanHand(){
   const meIdx = myIndex();
@@ -3492,6 +3527,18 @@ function renderHumanHand(){
     : fmtNum(me ? me.chips : 0) + (isEn() ? " chips" : " 筹码");
 
   if(!me){ c.innerHTML = ""; return; }
+    // ★ 阶段2b：如果自己还没牌，尝试从 pending 填充
+  if(me && (!me.holeCards || me.holeCards.length < 2)){
+    const myPeerId = window.PokerOnline ? PokerOnline.getMyId() : null;
+    if(myPeerId && G._pendingHoleCards && G._pendingHoleCards[myPeerId]){
+      const cards = G._pendingHoleCards[myPeerId];
+      if(cards && cards.length === 2){
+        me.holeCards = normalizeCards(cards);
+        delete G._pendingHoleCards[myPeerId];
+        G._lastHandSig = '';
+      }
+    }
+  }
   let sig;
   if(me.folded || me._spectator || me.holeCards.length < 2 || G.stage === 'waiting') sig = 'empty';
   else sig = cardsSig(me.holeCards) + '|' + (me._highlight ? cardsSig(Array.from(me._highlight)) : '');
