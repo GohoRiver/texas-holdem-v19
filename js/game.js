@@ -1474,7 +1474,6 @@ function runHostTurn(){
   if(countActive() <= 1){
     const pot = G.pot;
     awardUncontestedPot();
-    seat.classList.toggle("winner", !!p._isWinner && G.stage === 'showdown');;
     if(G.online.isHost) broadcastFullState();
     endHandHost(pot);
     return;
@@ -1737,13 +1736,21 @@ function endHandHost(totalPot){
 
 function broadcastFullState(){
   if(!G.online.isHost) return;
+  const myId = PokerOnline.getMyId();
   const state = {
     players: G.players.map(function(p){
+      // ★ 阶段2b：只有自己能看自己的牌，别人只有 reveal 时才可见
+      const isSelf = (p.peerId === myId);
+      const safeHoleCards = isSelf
+        ? p.holeCards
+        : (p.revealCards ? p.holeCards : []);
       return {
         id: p.id, peerId: p.peerId, name: p.name,
         chips: p.chips, folded: p.folded, allIn: p.allIn,
         seated: p.seated !== false,
-        currentBet: p.currentBet, holeCards: p.holeCards,
+        currentBet: p.currentBet,
+        holeCards: safeHoleCards,          // ★ 改了
+        holeCardCount: (p.holeCards && p.holeCards.length) || 0,   // ★ 新增：告诉客户端数量
         lastAction: p.lastAction,
         position: p.position, positionKey: p.positionKey,
         revealCards: p.revealCards,
@@ -1834,7 +1841,15 @@ function applyFullState(state){
     p.chips = sp.chips; p.folded = sp.folded; p.allIn = sp.allIn;
     p.seated = sp.seated !== false;
     p.currentBet = sp.currentBet;
-    p.holeCards = normalizeCards(sp.holeCards);
+        // ★ 阶段2b：不要覆盖自己已经本地解密的牌
+    const isSelf = (i === G.online.mySeat);
+    if(isSelf && p.holeCards && p.holeCards.length === 2){
+      // 保留本地解密结果（房主不知道我的牌，不能覆盖）
+    } else {
+      p.holeCards = normalizeCards(sp.holeCards);
+    }
+    // ★ 记录"别人有几张牌"（画背面用）
+    p._holeCardCount = sp.holeCardCount || (sp.holeCards ? sp.holeCards.length : 0);
     p.lastAction = sp.lastAction;
     p.position = sp.position; p.positionKey = sp.positionKey;
     p.revealCards = sp.revealCards;
@@ -3309,13 +3324,14 @@ seat.classList.toggle("winner-side", p._winnerType === 'side' && G.stage === 'sh
     const cards = seat.querySelector(".seat-cards");
     let nextCards = [];
     let showFace = false;
-    if(p.seated === false || p.holeCards.length < 2){
+    const cardCount = (p.holeCards && p.holeCards.length) || p._holeCardCount || 0;
+    if(p.seated === false || cardCount < 2){
       nextCards = [null, null];
     } else if(p.revealCards || i === myIndex()){
       nextCards = p.holeCards;
       showFace = true;
     } else {
-      nextCards = [null, null];
+      nextCards = [null, null];   // 别人：画背面
     }
     const cardSig = (showFace ? 'F:' : 'B:') + cardsSig(nextCards);
     if(cards && seat.getAttribute('data-card-sig') !== cardSig){
@@ -3324,7 +3340,7 @@ seat.classList.toggle("winner-side", p._winnerType === 'side' && G.stage === 'sh
       if(!showFace){
         const a = renderCardBackMini();
         const b = renderCardBackMini();
-        if(p.seated === false || p.folded || p.holeCards.length < 2){
+        if(p.seated === false || p.folded || cardCount < 2){
           a.style.opacity = ".2"; b.style.opacity = ".2";
         }
         cards.appendChild(a); cards.appendChild(b);
