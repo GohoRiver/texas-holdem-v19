@@ -1589,6 +1589,7 @@ function showdownHost(){
   stopTurnTimer();
   clearAllGameTimers();
   G.stage = "showdown";
+  G._settled = false;
   G.busy = true;
   log(t("showdownHeader"), "hl");
   PokerAudio.play('showdown');
@@ -1699,6 +1700,7 @@ ws.forEach(function(w, k){
   } catch(e){
     console.error('resolveHost error', e);
   } finally {
+    G._settled = true; 
     G.pot = 0; G.busy = false; G._busySince = 0;
     PokerAudio.play('win');
     render();
@@ -1758,7 +1760,12 @@ function broadcastFullState(){
         _spectator: p._spectator || false,
         _waitNextHand: p._waitNextHand || false,
         preflopOrder: p.preflopOrder, postflopOrder: p.postflopOrder,
-        _highlight: p._highlight ? Array.from(p._highlight) : null
+                _highlight: p._highlight ? Array.from(p._highlight) : null,
+        // ★ 新增
+        _isWinner: !!p._isWinner,
+        _winAmount: p._winAmount || 0,
+        _winnerType: p._winnerType || null,
+        _winPots: p._winPots ? p._winPots.slice() : []
       };
     }),
     pot: G.pot, currentBet: G.currentBet, stage: G.stage,
@@ -1856,6 +1863,10 @@ function applyFullState(state){
     p._intentReveal = sp._intentReveal || false;
     p._spectator = sp._spectator || false;
     p._waitNextHand = sp._waitNextHand || false;
+        p._isWinner = !!sp._isWinner;
+    p._winAmount = sp._winAmount || 0;
+    p._winnerType = sp._winnerType || null;
+    p._winPots = sp._winPots || [];
     p.preflopOrder = sp.preflopOrder; p.postflopOrder = sp.postflopOrder;
     if(sp._highlight) p._highlight = new Set(normalizeCards(sp._highlight));
     else p._highlight = null;
@@ -2154,10 +2165,12 @@ function handleOnlineMessage(msg){
     }
     case 'host_left': {
       const players = (window.PokerOnline && PokerOnline.getRoomPlayers) ? PokerOnline.getRoomPlayers() : {};
-      const ids = Object.keys(players);
-      if(ids.length === 0){
+      const myId = PokerOnline.getMyId();
+      const others = Object.keys(players).filter(function(pid){ return pid !== myId; });
+      if(others.length === 0){
+        // 房间空了 → 退出
         appToast(isEn() ? "Room closed" : "房间已关闭", "error");
-        try { PokerOnline.leaveRoom(); } catch(e){}   // ★ 加这一行
+        try { PokerOnline.leaveRoom(); } catch(e){}
         G.online.active = false;
         resetSessionState(); resetTableDom(); hideWaitingBar();
         document.body.classList.remove('game-active');
@@ -2165,6 +2178,14 @@ function handleOnlineMessage(msg){
         $("lobbyScreen").classList.remove("hidden");
         showScreen("lobby");
         renderRoomLists();
+      } else {
+        // ★ 还有人 → 切回等待，让用户决定去留
+        appToast(isEn() ? "Host left, waiting for new host..." : "房主已离桌，等待新房主…", "error");
+        G.stage = 'waiting';
+        G.online.started = false;
+        hideHumanActions();
+        showWaitingBar();
+        render();
       }
       break;
     }
@@ -2838,6 +2859,7 @@ function showdownAi(){
   stopTurnTimer();
   clearAllGameTimers();
   G.stage = "showdown";
+  G._settled = false;
   G.busy = true; G._busySince = Date.now();
   log(t("showdownHeader"), "hl");
   PokerAudio.play('showdown');
@@ -2946,6 +2968,7 @@ ws.forEach(function(w, k){
   } catch(e){
     console.error('resolveAi error', e);
   } finally {
+    G._settled = true; 
     G.pot = 0; G.busy = false; G._busySince = 0;
     PokerAudio.play('win');
     const me = G.players[0];
@@ -3422,7 +3445,8 @@ if(G.stage === 'showdown'){
     if(box && box.childNodes.length === 0) showHumanControls();
   }
   // ★ Showdown 时给每个座位飘 +N / −N 数字
-if(G.stage === 'showdown' && !G._deltaShown){
+if(G.stage === 'showdown' && G._settled && !G._deltaShown){
+  G._deltaShown = true;
   G._deltaShown = true;
 G.players.forEach(function(p){
   if(p.seated === false) return;
@@ -3512,7 +3536,10 @@ function tryApplyPendingHoles(){
         p.holeCards = normalizeCards(cards);
         applied = true;
         console.log('[pending] 已填入底牌:', peerId, cards.map(function(c){return c.rank+c.suit;}).join(' '));
-        if(G.online.mySeat === idx){
+               // ★ 关键：如果是自己的牌，强制设置 mySeat
+        const myId = window.PokerOnline ? PokerOnline.getMyId() : null;
+        if(peerId === myId){
+          G.online.mySeat = idx;
           G._currentHandMyCards = cards.map(function(c){ return c.suit + c.rank; });
         }
       }

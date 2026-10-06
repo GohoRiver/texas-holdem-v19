@@ -819,8 +819,20 @@ function resetActionSeq(){
   if(ch){
     let sent;
     try {
-      if(wasHost) sent = ch.send({ type: 'broadcast', event: 'host_left', payload: { peerId: myId } });
-      else sent = ch.send({ type: 'broadcast', event: 'leave', payload: { peerId: myId } });
+      if(wasHost){
+        // ★ 房主离桌 → 优先转让给其他玩家
+        const others = Object.keys(roomPlayers).filter(function(pid){
+          return pid !== myId && roomPlayers[pid].role === 'seated';
+        });
+        if(others.length > 0){
+          console.log('[leaveRoom] 转让房主给:', others[0]);
+          sent = ch.send({ type: 'broadcast', event: 'transfer_host', payload: { peerId: others[0] } });
+        } else {
+          sent = ch.send({ type: 'broadcast', event: 'host_left', payload: { peerId: myId } });
+        }
+      } else {
+        sent = ch.send({ type: 'broadcast', event: 'leave', payload: { peerId: myId } });
+      }
     } catch(e){ sent = null; }
     const cleanup = function(){ try { supabase.removeChannel(ch); } catch(e){} };
     if(sent && typeof sent.then === 'function'){
