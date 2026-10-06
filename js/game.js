@@ -59,6 +59,8 @@ const MIN_DEPOSIT_BEM = 0.001;
 const MIN_WITHDRAW_BEM = 0.0001;
 
 const CHIP_DENOMS = [100000, 50000, 20000, 10000, 5000, 1000, 500, 100, 25, 5, 1];
+const SUPABASE_URL_DEALER = 'https://olmlqguftnmnpyefrokk.supabase.co';
+const SUPABASE_KEY_DEALER = 'sb_publishable_QSRZnWEj0nJ1QdxmqBgPcA_0n9fP4oK';
 
 /* ================= 设备 & 方向 ================= */
 function detectDevice(){
@@ -1278,6 +1280,42 @@ G.seatPositions = computeSeatPositions(G.players.length);
   PokerOnline.sendGameStart(startPayload);
   startNewHandHost();
 }
+/* ★ 阶段2b：调用 Edge Function 发牌 */
+async function callDealerDeal(roomId, handNo){
+  const res = await fetch(SUPABASE_URL_DEALER + '/functions/v1/dealer', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'apikey': SUPABASE_KEY_DEALER,
+      'Authorization': 'Bearer ' + SUPABASE_KEY_DEALER
+    },
+    body: JSON.stringify({ action: 'deal', room_id: roomId, hand_no: handNo })
+  });
+  const data = await res.json();
+  if(!data.success) throw new Error(data.error || 'deal failed');
+  return data;
+}
+
+/* ★ 阶段2b：解密自己的加密底牌 */
+async function decryptMyHoles(myPeerId, holes){
+  const myHole = holes[myPeerId];
+  if(!myHole){
+    console.warn('[decrypt] 没有我的密文');
+    return [];
+  }
+  if(!window.PokerCrypto || !PokerCrypto.hasKeyPair()){
+    console.warn('[decrypt] 密钥对未就绪');
+    return [];
+  }
+  try {
+    const cards = await PokerCrypto.decryptHoleCards(myHole);
+    console.log('[decrypt] 我的底牌解密成功:', cards.map(function(c){return c.rank+c.suit;}).join(' '));
+    return cards;
+  } catch(e){
+    console.error('[decrypt] 失败', e);
+    return [];
+  }
+}
 
 async function startNewHandHost(){
   if(G.online.isHost && window.PokerOnline && PokerOnline._promoteWantingSpectators){
@@ -1303,8 +1341,28 @@ async function startNewHandHost(){
     G._deltaShown = false;
   /* ★ preflop 时 raiseCount 初始为 1（大盲算作第一次"下注"） */
   G.raiseCount = 1;
+  // ★ 阶段2b：调 Edge Function 发牌
+  let dealResult = null;
+  if(G.online.active && G.online.isHost){
+    try {
+      log(isEn() ? 'Requesting deal from server...' : '正在向服务器请求发牌...', 'hl');
+      dealResult = await callDealerDeal(G.online.roomId, G.handNumber);
+      G._encryptedHoles = dealResult.holes;
+      G._currentHandId = dealResult.hand_id;
+      G._seedCommit = dealResult.seed_commit;
+      log(isEn() ? 'Deal received (encrypted)' : '已收到加密牌堆', 'hl');
+    } catch(e){
+      console.error('[deal] Edge Function 调用失败', e);
+      log(isEn() ? 'Server deal failed, fallback to local' : '服务器发牌失败，回退本地', 'hl');
+      dealResult = null;
+    }
+  }
+
+  // ★ 本地 fallback（服务器不通时用，会暴露底牌但至少能玩）
   G.deck = PokerDeck.create();
-  PokerDeck.shuffle(G.deck);
+  if(!dealResult){
+    PokerDeck.shuffle(G.deck);
+  }
   G._renderedCards = new WeakSet();
   G._lastBoardSig = ''; G._lastHandSig = ''; G._lastActionSig = '';
   stopTurnTimer();
@@ -1333,12 +1391,50 @@ async function startNewHandHost(){
   });
   assignPositions();
   computeActionOrders();
-  const n = G.players.length;
-  for(let r = 0; r < 2; r++){
-    for(let i = 1; i <= n; i++){
-      const idx = (G.dealerIndex + i) % n;
-      const p = G.players[idx];
-      if(!p.folded) p.holeCards.push(G.deck.pop());
+  if(dealResult){
+    // ★ 阶段2b：用 Edge Function 返回的密文
+    // 本地 G.players[].holeCards 全部留空，等广播后每个人自己解密填自己那份
+    G.players.forEach(function(p){ p.holeCards = []; });
+
+    // 广播密文给所有人（包括房主自己）
+    PokerOnline.sendDealHoles({
+      hand_id: dealResult.hand_id,
+      hand_no: dealResult.hand_no,
+      seed_commit: dealResult.seed_commit,
+      holes: dealResult.holes,
+      dealer_seat: G.dealerIndex,
+      current_player_seat: G.currentPlayerIndex
+    });
+    log(isEn() ? 'Deal broadcasted' : '发牌已广播，等待各方解密', 'hl');
+
+    // 房主自己也解密一份
+    try {
+      const myPeerId = PokerOnline.getMyId();
+      const cards = await decryptMyHoles(myPeerId, dealResult.holes);
+      if(cards.length === 2){
+        const mySeat = G.players.findIndex(function(p){ return p.peerId === myPeerId; });
+        if(mySeat >= 0){
+          G.players[mySeat].holeCards = normalizeCards(cards);
+          if(G.players[G.online.mySeat]){
+            G._currentHandMyCards = G.players[G.online.mySeat].holeCards.map(function(c){ return c.suit + c.rank; });
+          }
+        }
+      }
+    } catch(e){
+      console.error('[deal] 房主自己解密失败', e);
+    }
+  } else {
+    // 本地 fallback
+    const n = G.players.length;
+    for(let r = 0; r < 2; r++){
+      for(let i = 1; i <= n; i++){
+        const idx = (G.dealerIndex + i) % n;
+        const p = G.players[idx];
+        if(!p.folded) p.holeCards.push(G.deck.pop());
+      }
+    }
+    if(G.players[G.online.mySeat]){
+      G._currentHandMyCards = G.players[G.online.mySeat].holeCards.map(function(c){ return c.suit + c.rank; });
     }
   }
   if(G.players[G.online.mySeat]){
@@ -1836,7 +1932,36 @@ function handleOnlineMessage(msg){
     if(G.online.isHost) broadcastFullState();
     return;
   }
+  // ★ 阶段2b：处理加密发牌广播
+  if(msg.type === 'deal_holes'){
+    const data = msg.data;
+    if(!data || !data.holes) return;
+    console.log('[deal_holes] 收到加密牌堆, hand:', data.hand_no);
 
+    (async function(){
+      const myPeerId = PokerOnline.getMyId();
+      const myHole = data.holes[myPeerId];
+      if(!myHole){
+        console.warn('[deal_holes] 没有我的密文');
+        return;
+      }
+      try {
+        const cards = await PokerCrypto.decryptHoleCards(myHole);
+        const mySeat = G.players.findIndex(function(p){ return p.peerId === myPeerId; });
+        if(mySeat >= 0){
+          G.players[mySeat].holeCards = normalizeCards(cards);
+          if(G.online.mySeat === mySeat){
+            G._currentHandMyCards = cards.map(function(c){ return c.suit + c.rank; });
+          }
+          console.log('[deal_holes] 我的底牌:', cards.map(function(c){return c.rank+c.suit;}).join(' '));
+          render();
+        }
+      } catch(e){
+        console.error('[deal_holes] 解密失败', e);
+      }
+    })();
+    return;
+  }
   if(G.online.isHost){
     switch(msg.type){
       case 'player_join': {

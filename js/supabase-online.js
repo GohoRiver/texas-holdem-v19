@@ -413,6 +413,9 @@ channel.on('broadcast', { event: 'sync_request' }, (payload) => {
       if(!isHost) return;
       if(onMessage) onMessage({ type: 'state_request', peerId: payload.payload.peerId });
     });
+        channel.on('broadcast', { event: 'deal_holes' }, (payload) => {
+      if(onMessage) onMessage({ type: 'deal_holes', data: payload.payload });
+    });
 
     hostRoomInfo = {
       roomId: roomId,
@@ -559,6 +562,10 @@ async function buildJoinPayload(roomId, peerId){
     channel.on('broadcast', { event: 'full_state' }, (payload) => {
       if(onMessage) onMessage({ type: 'full_state', state: payload.payload });
     });
+        channel.on('broadcast', { event: 'deal_holes' }, (payload) => {
+      // 客户端收到房主广播的加密底牌
+      if(onMessage) onMessage({ type: 'deal_holes', data: payload.payload });
+    });
 
     channel.on('broadcast', { event: 'chat' }, (payload) => {
       if(onMessage) onMessage({ type: 'chat', ...payload.payload });
@@ -639,6 +646,11 @@ async function buildJoinPayload(roomId, peerId){
   }
 
   function sendFullState(state){ send('full_state', state); }
+  /* ★ 阶段2b：广播本手加密底牌 */
+function sendDealHoles(payload){
+  // payload: { hand_id, hand_no, seed_commit, holes, dealer_seat, current_player_seat }
+  send('deal_holes', payload);
+}
   function sendPlayerAction(payload){ send('player_action', payload); }
   /* ★ 新增：动作签名相关 */
 let _lastSeqByPeer = {};   // { peerId: lastAcceptedSeq }
@@ -843,7 +855,7 @@ resetActionSeq();
     getKnownRooms, isHost: function(){ return isHost; },
     sendPlayerActionSigned,    // ★ 新增
   verifyActionSignature,     // ★ 新增
-  resetActionSeq             // ★ 新增
-
+  resetActionSeq,             // ★ 新增
+sendDealHoles
   };
 })();
