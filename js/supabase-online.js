@@ -29,20 +29,18 @@ async function upsertMyPubkey(roomId, peerId){
     const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     const pubkeyStr = JSON.stringify(pubJwk);
 
-    // ★ 先 SELECT 检查行是否存在（避免 409）
+    // ★ 先 SELECT 检查是否已存在
     const { data: existing, error: selErr } = await sb
       .from('room_players')
-      .select('peer_id, pubkey')
+      .select('peer_id')
       .eq('room_id', roomId)
       .eq('peer_id', peerId)
       .maybeSingle();
 
-    if(selErr){
-      console.warn('[pubkey] select 失败', selErr);
-    }
+    if(selErr) console.warn('[pubkey] select 失败', selErr);
 
     if(existing){
-      // 行存在 → UPDATE
+      // 已存在 → UPDATE
       const { error: updErr } = await sb
         .from('room_players')
         .update({ name: nickname, pubkey: pubkeyStr })
@@ -51,7 +49,7 @@ async function upsertMyPubkey(roomId, peerId){
       if(updErr) console.warn('[pubkey] update 失败', updErr);
       else console.log('[pubkey] 已更新:', roomId, peerId);
     } else {
-      // 行不存在 → INSERT
+      // 不存在 → INSERT
       const { error: insErr } = await sb
         .from('room_players')
         .insert({
