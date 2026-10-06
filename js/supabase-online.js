@@ -29,7 +29,29 @@ async function upsertMyPubkey(roomId, peerId){
     const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     const pubkeyStr = JSON.stringify(pubJwk);
 
-    // ★ 先 SELECT 检查是否已存在
+    // ★ 步骤 1：确保 rooms 表有这条记录（外键依赖）
+    const { data: roomExists } = await sb
+      .from('rooms')
+      .select('room_id')
+      .eq('room_id', roomId)
+      .maybeSingle();
+
+    if(!roomExists){
+      const { error: roomErr } = await sb.from('rooms').insert({
+        room_id: roomId,
+        mode: roomInfo.mode || 'points',
+        level: roomInfo.level || 'nano',
+        small_blind: 100,
+        big_blind: 200
+      });
+      if(roomErr && roomErr.code !== '23505'){   // 23505 = 并发重复，忽略
+        console.warn('[room] insert 失败', roomErr);
+      } else {
+        console.log('[room] 已创建:', roomId);
+      }
+    }
+
+    // ★ 步骤 2：SELECT 检查玩家是否已存在
     const { data: existing, error: selErr } = await sb
       .from('room_players')
       .select('peer_id')
@@ -40,7 +62,6 @@ async function upsertMyPubkey(roomId, peerId){
     if(selErr) console.warn('[pubkey] select 失败', selErr);
 
     if(existing){
-      // 已存在 → UPDATE
       const { error: updErr } = await sb
         .from('room_players')
         .update({ name: nickname, pubkey: pubkeyStr })
@@ -49,7 +70,6 @@ async function upsertMyPubkey(roomId, peerId){
       if(updErr) console.warn('[pubkey] update 失败', updErr);
       else console.log('[pubkey] 已更新:', roomId, peerId);
     } else {
-      // 不存在 → INSERT
       const { error: insErr } = await sb
         .from('room_players')
         .insert({
