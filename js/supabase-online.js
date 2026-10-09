@@ -94,6 +94,28 @@ async function upsertMyPubkey(roomId, peerId){
   const ANNOUNCE_MS = 2000;
   const MAX_SEATS = 7;
 
+  async function waitSeatedPubkeys(timeoutMs){
+  const deadline = Date.now() + (timeoutMs || 4000);
+  const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  while(Date.now() < deadline){
+    const seated = Object.keys(roomPlayers).filter(function(pid){
+      return roomPlayers[pid] && roomPlayers[pid].role === 'seated';
+    });
+    if(!seated.length) return false;
+    const { data, error } = await sb
+      .from('room_players')
+      .select('peer_id, pubkey')
+      .eq('room_id', currentRoomId)
+      .in('peer_id', seated);
+    if(error){ console.warn('[waitPubkeys] query failed', error); return false; }
+    const ok = (data || []).every(function(r){ return !!r.pubkey; });
+    if(ok) return true;
+    await new Promise(function(r){ setTimeout(r, 250); });
+  }
+  console.warn('[waitPubkeys] timeout, some pubkeys missing');
+  return false;
+}
+
   function init(){
     if(!window.supabase) return Promise.reject(new Error('Supabase SDK not loaded'));
     supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -212,6 +234,14 @@ function broadcastPlayerList(){
     announceRoom();
     broadcastPlayerList();
   }
+
+  function clearAllReady(){
+  Object.keys(roomPlayers).forEach(function(pid){
+    roomPlayers[pid].ready = false;
+  });
+  if(isHost) broadcastPlayerList();
+  notifyPlayers();
+}
 
   function createRoom(roomId, info){
     isHost = true;
@@ -356,7 +386,7 @@ function broadcastPlayerList(){
       if(!roomPlayers[targetId]) return;
       hostPeerId = targetId;
       isHost = false;
-      try { channel.send({ type:'broadcast', event:'host_transferred', payload:{ newHostPeerId: targetId } }); } catch(e){}
+      try { channel.send({ type:'broadcast', event:'host_transferred', payload:{ newHostPeerId: targetId, oldHostPeerId: myId } }); } catch(e){}
       /* 停止自己的公告 */
       stopAnnounce();
       broadcastPlayerList();
@@ -496,6 +526,8 @@ async function buildJoinPayload(roomId, peerId){
       roomInfo.gameStarted = !!payload.payload.gameStarted;
       console.log('[client] 收到 player_list:', Object.keys(roomPlayers).length, '个玩家');
       notifyPlayers();
+      // ★ 让等待室的徽章/座位刷新
+      if(onMessage) onMessage({ type: 'player_list_updated' });
     });
 
     channel.on('broadcast', { event: 'ready' }, (payload) => {
@@ -524,13 +556,15 @@ async function buildJoinPayload(roomId, peerId){
     /* ★ 房主变更 */
     channel.on('broadcast', { event: 'host_transferred' }, (payload) => {
       const newHostId = payload.payload.newHostPeerId;
+      const oldHostId = payload.payload.oldHostPeerId;
+      // ★ 关键：先把旧房主从 roomPlayers 删掉，避免残留
+      if(oldHostId && roomPlayers[oldHostId]) delete roomPlayers[oldHostId];
       if(newHostId === myId){
-        /* 我成为新房主 */
         becomeHost();
-        if(onMessage) onMessage({ type: 'became_host' });
+        if(onMessage) onMessage({ type: 'became_host', oldHostPeerId: oldHostId });
       } else {
         hostPeerId = newHostId;
-        if(onMessage) onMessage({ type: 'host_changed', peerId: newHostId });
+        if(onMessage) onMessage({ type: 'host_changed', peerId: newHostId, oldHostPeerId: oldHostId });
       }
       notifyPlayers();
     });
@@ -819,13 +853,12 @@ function resetActionSeq(){
   if(ch){
     let sent;
     try {
-      if(wasHost){
+            if(wasHost){
         const others = Object.keys(roomPlayers).filter(function(pid){
           return pid !== myId && roomPlayers[pid].role === 'seated';
         });
         if(others.length > 0){
           console.log('[leaveRoom] 转让房主给:', others[0]);
-          // ★ 直接发 host_transferred，让客户端能收到
           sent = ch.send({
             type: 'broadcast',
             event: 'host_transferred',
@@ -872,6 +905,8 @@ resetActionSeq();
     sendPlayerActionSigned,    // ★ 新增
   verifyActionSignature,     // ★ 新增
   resetActionSeq,             // ★ 新增
+      waitSeatedPubkeys,
+    clearAllReady,
 sendDealHoles
   };
 })();

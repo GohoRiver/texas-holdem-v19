@@ -577,11 +577,14 @@ function syncWaitingSeatsFromRoom(){
       old._spectator = false;
       return old;
     }
+    // ★ 和局外筹码统一：优先取房间 level 的 buyMax
+    const lv = G._onlineLv || LEVELS.find(function(l){ return l.key === G.tableMode; }) || LEVELS[0];
+    const initialChips = lv.buyMax;
     return {
       id: info.seat, peerId: pid, name: info.name,
       emoji: isSelf ? PokerAvatars.HUMAN.emoji : '🎮',
       bg: isSelf ? PokerAvatars.HUMAN.bg : 'linear-gradient(135deg,#a855f7,#6d28d9)',
-      isHuman: isSelf, chips: 10000, seated: true,
+      isHuman: isSelf, chips: initialChips, seated: true,
       holeCards: [], folded: false, allIn: false,
       currentBet: 0, totalContributed: 0, needsToAct: false,
       position:'', positionKey:'', lastAction:'', styleKey:null,
@@ -599,6 +602,10 @@ function syncWaitingSeatsFromRoom(){
 
 function returnToWaiting(){
   clearAllGameTimers();
+    // ★ 清掉所有玩家的准备状态
+  if(window.PokerOnline && PokerOnline.clearAllReady) PokerOnline.clearAllReady();
+  G._rebuyShownFor = 0;
+  G._recordedHandKey = null;
   clearShowCardsTimer();
   if(G._nextHandTimer){ clearInterval(G._nextHandTimer); G._nextHandTimer = null; }
   if(G._nextHandToastTimer){ clearInterval(G._nextHandToastTimer); G._nextHandToastTimer = null; }
@@ -737,7 +744,6 @@ function checkRosterSync(){
     }
   });
   render();
-  // ★ 关键：如果离桌的就是当前行动者，立即推进（不用等 30s）
   if(currentLeft){
     setTimeout(function(){
       if(G.online.isHost && !G.gameOver && G.stage !== 'showdown' && G.stage !== 'waiting'){
@@ -1244,18 +1250,26 @@ function hostStartGame(playerOrder, playersInfo){
     return (ia && ia.seat || 0) - (ib && ib.seat || 0);
   });
   const lv = G._onlineLv || LEVELS[0];
-  const buyInChips = lv.buyMax;
+  // ★ 用玩家的实际余额，最多 = buyMax，最少 = buyMin
+  const myBalance = (G.gameMode === 'real')
+    ? Math.floor((window.PokerWallet ? PokerWallet.getContractBalance() : 0) / CHIP_TO_BEM)
+    : PokerStorage.getPoints();
+  const buyInChips = Math.min(lv.buyMax, Math.max(lv.buyMin, myBalance));
 
   G.players = ordered.map(function(pid){
     const info = playersInfo.find(function(p){ return p.peerId === pid; }) || { name:'Player', seat: 0 };
     const isSelf = pid === myId;
     if(isSelf){
-      let have = PokerStorage.getPoints();
-      if(have < buyInChips){
-        PokerStorage.addPoints(buyInChips - have + 10000);
-        have = PokerStorage.getPoints();
+      if(G.gameMode === 'points'){
+        let have = PokerStorage.getPoints();
+        if(have < buyInChips){
+          // 只补到 buyInChips，不额外送
+          PokerStorage.addPoints(buyInChips - have);
+          have = PokerStorage.getPoints();
+        }
+        PokerStorage.setPoints(have - buyInChips);
       }
-      PokerStorage.setPoints(have - buyInChips);
+      // real 模式由链上结算，不在这里扣
     }
     return {
       id: info.seat || 0, peerId: pid, name: info.name,
@@ -1356,6 +1370,8 @@ async function startNewHandHost(){
   let dealResult = null;
   if(G.online.active && G.online.isHost){
     try {
+      log(isEn() ? 'Waiting for all pubkeys...' : '等待所有玩家公钥就绪...', 'hl');
+      await PokerOnline.waitSeatedPubkeys(5000);
       log(isEn() ? 'Requesting deal from server...' : '正在向服务器请求发牌...', 'hl');
       dealResult = await callDealerDeal(G.online.roomId, G.handNumber);
       G._encryptedHoles = dealResult.holes;
@@ -1375,6 +1391,9 @@ PokerDeck.shuffle(G.deck);   // ★ 无论如何都洗（公共牌用）
   G._renderedCards = new WeakSet();
   G._lastBoardSig = ''; G._lastHandSig = ''; G._lastActionSig = '';
   stopTurnTimer();
+    // ★ 记录本手起始筹码（玩家端结算 delta 用）
+  const meStart = G.players[G.online.mySeat];
+  if(meStart) G._handStartChips = meStart.chips;
     G.players.forEach(function(p){
     p.folded = p.chips <= 0 || p.seated === false;
     p.allIn = false; p.currentBet = 0; p.totalContributed = 0;
@@ -1742,28 +1761,21 @@ function endHandHost(totalPot){
   if(G.online.isHost) broadcastFullState();
   offerShowCards();
 
-  // ★ 新增 1：自己筹码见底 → 弹补码
+  // ★ 自己筹码见底 → 弹补码
   if(me && me.chips <= 0){
     setTimeout(showRebuy, 800);
     return;
   }
 
-  // ★ 新增 2：只剩 <2 个有筹码玩家 → 回等待室
-  const withChips = G.players.filter(function(p){
-    return p.seated !== false && p.chips > 0;
+  // ★ 有人筹码见底 → 清准备 + 回等待室
+  const broke = G.players.filter(function(p){
+    return p.seated !== false && p.chips <= 0;
   });
-  if(withChips.length < 2){
-    log(isEn() ? "Only one player has chips — waiting for rebuy" : "只剩一个有筹码的玩家 —— 等待补码", "hl");
+  if(broke.length){
+    log(isEn() ? "Someone out of chips — waiting for rebuy" : "有人筹码见底 —— 等待补码", "hl");
+    if(window.PokerOnline && PokerOnline.clearAllReady) PokerOnline.clearAllReady();
     setTimeout(function(){
-      if(G.online.isHost){
-        returnToWaiting();
-      } else {
-        G.stage = 'waiting';
-        G.online.started = false;
-        hideHumanActions();
-        showWaitingBar();
-        render();
-      }
+      if(G.online.isHost) returnToWaiting();
     }, 2500);
     return;
   }
@@ -1884,16 +1896,20 @@ function applyFullState(state){
     p.seated = sp.seated !== false;
     p.currentBet = sp.currentBet;
      // ★ 阶段2b：保护自己的牌
-    const isSelf = (i === G.online.mySeat);
+    // ★ 关键：按 peerId 判自己，不用座位下标（第一手 mySeat 可能是 -1）
     const myId0 = window.PokerOnline ? PokerOnline.getMyId() : null;
-    if(isSelf && p.holeCards && p.holeCards.length === 2){
-      // 保留本地解密结果
-    } else if(isSelf && myId0 && G._pendingHoleCards && G._pendingHoleCards[myId0] && G._pendingHoleCards[myId0].length === 2){
-      // 从 pending 里救回来
-      p.holeCards = normalizeCards(G._pendingHoleCards[myId0]);
-      G._currentHandMyCards = G._pendingHoleCards[myId0].map(function(c){ return c.suit + c.rank; });
-      delete G._pendingHoleCards[myId0];
-      G._lastHandSig = '';
+    const isSelf = (p.peerId === myId0);
+    if(isSelf){
+      G.online.mySeat = i;
+      G._spectatorMode = false;
+      const pending = myId0 && G._pendingHoleCards && G._pendingHoleCards[myId0];
+      if(pending && pending.length === 2){
+        p.holeCards = normalizeCards(pending);
+        G._currentHandMyCards = pending.map(function(c){ return c.suit + c.rank; });
+        G._lastHandSig = '';
+      } else if(!(p.holeCards && p.holeCards.length === 2)){
+        p.holeCards = normalizeCards(sp.holeCards);
+      }
     } else {
       p.holeCards = normalizeCards(sp.holeCards);
     }
@@ -1934,7 +1950,42 @@ function applyFullState(state){
   tryApplyPendingHoles();
 
   render();
+  // ★ 玩家端：结算时自己记一笔（房主端在 endHandHost 里记，这里补玩家）
+  const meNow = G.players[G.online.mySeat];
+  const handOver = (state.stage === 'showdown' || state.stage === 'waiting' ||
+                    (state.nextHandEndsAt && state.nextHandEndsAt > Date.now()));
+  if(meNow && handOver){
+    const handKey = 'h' + G.handNumber;
+    if(G._recordedHandKey !== handKey){
+      G._recordedHandKey = handKey;
+      const delta = meNow.chips - (G._handStartChips || meNow.chips);
+      PokerStorage.recordHand(delta, state.pot || 0);
+      try {
+        let result = '';
+        if(meNow.holeCards && meNow.holeCards.length >= 2 && G.community && G.community.length >= 3){
+          const r = PokerEval.bestHand(meNow.holeCards.concat(G.community));
+          if(r && r.score) result = PokerEval.nameOf(r.score);
+        }
+        PokerStorage.addHandHistory({
+          handNumber: G.handNumber,
+          myCards: (G._currentHandMyCards || []).slice(),
+          community: (G.community || []).map(function(c){ return c.suit + c.rank; }),
+          result: result, delta: delta, pot: state.pot || 0
+        });
+      } catch(e){ console.warn('player record failed', e); }
+      refreshHistoryPanelsIfOpen();
+    }
+  }
 
+  // ★ 玩家端：自己筹码 <= 0 → 弹补码
+  if(meNow && meNow.chips <= 0 && meNow.seated !== false && handOver){
+    if(G._rebuyShownFor !== handKey){
+      G._rebuyShownFor = handKey;
+      setTimeout(showRebuy, 500);
+    }
+  } else if(meNow && meNow.chips > 0){
+    if(G._rebuyShownFor !== 'h' + G.handNumber) G._rebuyShownFor = 0;
+  }
   if((G.stage === 'showdown' || (state.nextHandEndsAt && state.nextHandEndsAt > Date.now())) && !G.gameOver){
     offerShowCards();
   }
@@ -1983,7 +2034,19 @@ function syncCountdownFromState(state){
     G._turnTickTimer = setInterval(update, 200);
   }
 }
-
+function dropPeer(peerId){
+  if(!peerId) return;
+  const before = G.players.length;
+  G.players = G.players.filter(function(p){ return p.peerId !== peerId; });
+  if(G.players.length === before) return;
+  const myId = window.PokerOnline ? PokerOnline.getMyId() : null;
+  G.online.mySeat = G.players.findIndex(function(p){ return p.peerId === myId; });
+  G._spectatorMode = (G.online.mySeat < 0);
+  G.seatPositions = computeSeatPositions(G.players.length);
+  // ★ 若被删的是别人，清掉他们的桌位 DOM
+  const stale = document.querySelector('.seat[data-pid="' + peerId + '"]');
+  if(stale) stale.remove();
+}
 /* ================= 消息处理 ================= */
 function handleOnlineMessage(msg){
   if(!msg || !msg.type) return;
@@ -2076,6 +2139,24 @@ function handleOnlineMessage(msg){
         break;
       }
       case 'host_start_game': hostStartGame(msg.playerOrder, msg.players); break;
+            case 'rebuy': {
+        const p = G.players.find(function(x){ return x.peerId === msg.peerId; });
+        if(p){
+          p.chips = msg.amount || p.chips;
+          p.seated = true;
+          p.folded = false;
+        }
+        if(window.PokerOnline && PokerOnline.clearAllReady) PokerOnline.clearAllReady();
+        broadcastFullState();
+        // 如果现在 >= 2 个有筹码玩家，进入下一手
+        const withChips = G.players.filter(function(x){
+          return x.seated !== false && x.chips > 0;
+        });
+        if(withChips.length >= 2 && G.stage === 'waiting'){
+          setTimeout(function(){ startNewHandHost(); }, 800);
+        }
+        break;
+      }
       case 'player_action': {
         const player = G.players.find(function(p){ return p.peerId === msg.playerId; });
         if(!player) {
@@ -2193,26 +2274,28 @@ function handleOnlineMessage(msg){
     }
     case 'became_host': {
       G.online.isHost = true;
+      dropPeer(msg.oldHostPeerId);
       if(window.PokerOnline && PokerOnline.becomeHost){
         try { PokerOnline.becomeHost(); } catch(e){}
       }
       appToast(isEn() ? "You are now the host" : "你已成为新房主", "success");
       updateSpectatorUI();
+      syncWaitingSeatsFromRoom();
+      render();
       setTimeout(function(){ if(G.online.started) broadcastFullState(); }, 300);
       break;
     }
     case 'host_changed': {
+      dropPeer(msg.oldHostPeerId);
       updateSpectatorUI();
-      // ★ 房主变更 → 游戏状态必须重置，不然会卡在局内
-      if(G.stage !== 'waiting' && G.online.started){
-        appToast(isEn() ? "Host changed — game paused" : "房主已变更 —— 对局已暂停", "error");
-        G.stage = 'waiting';
-        G.online.started = false;
-        hideHumanActions();
-        stopTurnTimer();
-        showWaitingBar();
-        render();
-      }
+      appToast(isEn() ? "Host changed — game paused" : "房主已变更 —— 对局已暂停", "error");
+      G.stage = 'waiting';
+      G.online.started = false;
+      hideHumanActions();
+      stopTurnTimer();
+      showWaitingBar();
+      syncWaitingSeatsFromRoom();
+      render();
       break;
     }
     case 'host_left': {
@@ -2220,7 +2303,6 @@ function handleOnlineMessage(msg){
       const myId = PokerOnline.getMyId();
       const others = Object.keys(players).filter(function(pid){ return pid !== myId; });
       if(others.length === 0){
-        // 房间空了
         appToast(isEn() ? "Room closed" : "房间已关闭", "error");
         try { PokerOnline.leaveRoom(); } catch(e){}
         G.online.active = false;
@@ -2237,8 +2319,16 @@ function handleOnlineMessage(msg){
         hideHumanActions();
         stopTurnTimer();
         showWaitingBar();
+        syncWaitingSeatsFromRoom();
         render();
       }
+      break;
+    }
+    case 'player_list_updated': {
+      if(G.stage === 'waiting' || !G.online.started){
+        syncWaitingSeatsFromRoom();
+      }
+      renderPlayersList();
       break;
     }
     case 'room_full':
@@ -3136,6 +3226,22 @@ function showRebuy(){
     me.chips = amount;
     G.sessionBuyIn += amount;
     PokerAudio.play('chip');
+
+    // ★ 联机模式：不能自己开一局，必须通知房主
+    if(G.online.active){
+      $("rebuyOverlay").classList.add("hidden");
+      if(G.online.isHost){
+        me.seated = true;
+        if(window.PokerOnline && PokerOnline.clearAllReady) PokerOnline.clearAllReady();
+        broadcastFullState();
+        returnToWaiting();
+      } else if(window.PokerOnline && PokerOnline.send){
+        PokerOnline.send('rebuy', { peerId: PokerOnline.getMyId(), amount: amount });
+        appToast(isEn() ? "Rebuy request sent" : "补码请求已发送，等待房主确认", "success");
+      }
+      return;
+    }
+
     rotateDealerAndStart(function(){
       if(G.gameMode === 'ai') startNewHandAi(); else startNewHandHost();
     });
@@ -3569,7 +3675,7 @@ function renderWaitingTable(container){
           '<div><span class="seat-style">P2P</span></div>' +
         '</div>' +
       '</div>' +
-      '<div class="seat-chips">10,000 ' + t("chips") + '</div>' +
+            '<div class="seat-chips">' + fmtNum((G._onlineLv || { buyMax: 10000 }).buyMax) + ' ' + t("chips") + '</div>' +
       '<div class="seat-bet">' + (isEn() ? 'Seat ' : '座位 ') + (seatIdx + 1) + '</div>';
     container.appendChild(seat);
   }
@@ -3591,20 +3697,15 @@ function tryApplyPendingHoles(){
         applied = true;
         console.log('[pending] 已填入底牌:', peerId, cards.map(function(c){return c.rank+c.suit;}).join(' '));
       }
-      // ★ 无论是否写入，只要是自己就强制修 mySeat
       if(peerId === myId){
         if(G.online.mySeat !== idx){
           G.online.mySeat = idx;
+          G._spectatorMode = false;
           console.log('[pending] 强制设置 mySeat =', idx);
         }
         G._currentHandMyCards = cards.map(function(c){ return c.suit + c.rank; });
       }
-      // ★ 只有真正写入才删缓存；否则保留（防后续被 full_state 覆盖）
-      if(needWrite){
-        delete G._pendingHoleCards[peerId];
-      }
-    } else {
-      console.log('[pending] 玩家未就位，继续缓存:', peerId);
+      // ★ 不删缓存，等 handNumber 变化时统一清
     }
   }
   if(applied){
@@ -3616,7 +3717,17 @@ function tryApplyPendingHoles(){
 
 function renderHumanHand(){
   const meIdx = myIndex();
-  const me = (meIdx >= 0) ? G.players[meIdx] : null;
+  let me = (meIdx >= 0) ? G.players[meIdx] : null;
+  // ★ 关键：如果 mySeat 无效，尝试用 peerId 找回自己
+  const myId2 = window.PokerOnline ? PokerOnline.getMyId() : null;
+  if(!me && myId2){
+    const idx2 = G.players.findIndex(function(p){ return p.peerId === myId2; });
+    if(idx2 >= 0){
+      G.online.mySeat = idx2;
+      G._spectatorMode = false;
+      me = G.players[idx2];
+    }
+  }
   const c = $("handCardsLarge");
   if(!c) return;
 
@@ -4393,7 +4504,7 @@ document.addEventListener("DOMContentLoaded", function(){
         if(G.online.active && (G.stage === 'waiting' || !G.online.started)){
           syncWaitingSeatsFromRoom();
         }
-        // ★ 新增：房主在局中时，检测离桌并立即推进
+        // ★ 房主在局中时，检测离桌并立即推进
         if(G.online.active && G.online.isHost && G.online.started && G.stage !== 'waiting'){
           checkRosterSync();
         }
