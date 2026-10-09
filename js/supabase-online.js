@@ -233,7 +233,43 @@ function broadcastPlayerList(){
     hostAnnounceTimer = setInterval(announceRoom, ANNOUNCE_MS);
     announceRoom();
     broadcastPlayerList();
+    startHostScan();   // ★ 启动心跳扫描
   }
+
+  let hostScanTimer = null;
+const PEER_TIMEOUT_MS = 20000;
+
+function startHostScan(){
+  if(hostScanTimer) clearInterval(hostScanTimer);
+  hostScanTimer = setInterval(function(){
+    if(!isHost) return;
+    const now = Date.now();
+    const dead = [];
+    Object.keys(roomPlayers).forEach(function(pid){
+      if(pid === myId) return;
+      const rp = roomPlayers[pid];
+      if(!rp || rp.role !== 'seated') return;
+      const last = rp._lastSeen || 0;
+      if(last > 0 && now - last > PEER_TIMEOUT_MS) dead.push(pid);
+    });
+    if(dead.length){
+      dead.forEach(function(pid){
+        console.log('[host] peer timeout, removing:', pid);
+        delete roomPlayers[pid];
+      });
+      broadcastPlayerList();
+      notifyPlayers();
+      announceRoom();
+      dead.forEach(function(pid){
+        if(onMessage) onMessage({ type: 'player_leave', peerId: pid });
+      });
+    }
+  }, 5000);
+}
+
+function stopHostScan(){
+  if(hostScanTimer){ clearInterval(hostScanTimer); hostScanTimer = null; }
+}
 
   function clearAllReady(){
   Object.keys(roomPlayers).forEach(function(pid){
@@ -419,10 +455,14 @@ function broadcastPlayerList(){
 
 channel.on('broadcast', { event: 'sync_request' }, (payload) => {
   if(!isHost) return;
-  broadcastPlayerList();       // ★ 先重发玩家列表
-  notifyPlayers();             // ★ 也通知本地 UI
-  announceRoom();              // ★ 顺便更新大厅计数
-  if(onMessage) onMessage({ type: 'sync_request', peerId: payload.payload.peerId });
+  const pid = payload.payload && payload.payload.peerId;
+  if(pid && roomPlayers[pid]){
+    roomPlayers[pid]._lastSeen = Date.now();   // ★ 记录时间戳
+  }
+  broadcastPlayerList();
+  notifyPlayers();
+  announceRoom();
+  if(onMessage) onMessage({ type: 'sync_request', peerId: pid });
 });
 
     channel.on('broadcast', { event: 'player_action' }, (payload) => {
@@ -456,11 +496,16 @@ channel.on('broadcast', { event: 'sync_request' }, (payload) => {
 
         return new Promise(function(resolve){
       channel.subscribe(function(status){
+                  // 房主自己每 5 秒更新一下自己的时间戳（虽然扫描跳过自己，但方便将来切换）
+          setInterval(function(){
+            if(roomPlayers[myId]) roomPlayers[myId]._lastSeen = Date.now();
+          }, 5000);
         if(status === 'SUBSCRIBED'){
           roomPlayers[myId] = {
             name: nickname, ready: false, seat: 0,
             role: 'seated', wantsSeat: false, isSelf: true
           };
+                    roomPlayers[myId]._lastSeen = Date.now();
           broadcastPlayerList();
           notifyPlayers();
           announceRoom();
@@ -469,6 +514,7 @@ channel.on('broadcast', { event: 'sync_request' }, (payload) => {
             announceRoom();
             broadcastPlayerList();
           }, ANNOUNCE_MS);
+                    startHostScan();   // ★ 房主启动心跳扫描
           resolve();
 
           // ★ 阶段2a：异步生成密钥 + 写入数据库
@@ -612,39 +658,28 @@ async function buildJoinPayload(roomId, peerId){
         return new Promise(function(resolve){
       channel.subscribe(async function(status){
         if(status === 'SUBSCRIBED'){
-          // ★ 阶段2a：先写入公钥到数据库
-          try { await upsertMyPubkey(roomId, myId); }
-          catch(e){ console.warn('[joinRoom] pubkey 写入失败', e); }
+          roomPlayers[myId] = {
+            name: nickname, ready: false, seat: 0,
+            role: 'seated', wantsSeat: false, isSelf: true
+          };
+          roomPlayers[myId]._lastSeen = Date.now();
+          broadcastPlayerList();
+          notifyPlayers();
+          announceRoom();
+          if(hostAnnounceTimer) clearInterval(hostAnnounceTimer);
+          hostAnnounceTimer = setInterval(function(){
+            announceRoom();
+            broadcastPlayerList();
+          }, ANNOUNCE_MS);
+          startHostScan();
 
-          // 首次进房先签名一次
-          let joinPayload;
-          try {
-            joinPayload = await buildJoinPayload(roomId, myId);
-          } catch(e){
-            console.error('[join] buildJoinPayload failed', e);
-            joinPayload = { peerId: myId, name: nickname, password: roomInfo.password };
-          }
+          // ★ 新增：房主心跳
+          setInterval(function(){
+            if(roomPlayers[myId]) roomPlayers[myId]._lastSeen = Date.now();
+          }, 5000);
 
-          // 广播 3 次（防止丢包）
-          for(let i = 0; i < 3; i++){
-            setTimeout(function(){
-              send('player_join', joinPayload);
-            }, i * 300);
-          }
-
-          // ★ 关键修复：加入后立即请求一次同步，不用等 12 秒
-          setTimeout(function(){
-            send('sync_request', { peerId: myId });
-          }, 800);
-          setTimeout(function(){
-            send('sync_request', { peerId: myId });
-          }, 2000);
-
-          heartbeatTimer = setInterval(function(){
-            if(!channel) return;
-            send('sync_request', { peerId: myId });
-          }, 12000);
           resolve();
+          
         }
       });
     });
@@ -847,6 +882,7 @@ function resetActionSeq(){
     } catch(e){}
   }
   if(hostAnnounceTimer){ clearInterval(hostAnnounceTimer); hostAnnounceTimer = null; }
+    stopHostScan();
   hostRoomInfo = null;
 
   const ch = channel; channel = null;

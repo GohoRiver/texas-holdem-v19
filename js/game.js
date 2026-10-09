@@ -1412,11 +1412,6 @@ PokerDeck.shuffle(G.deck);   // ★ 无论如何都洗（公共牌用）
       p.chips = G.bigBlind * 100 || 1000;
     }
   });
-  G.players.forEach(function(p){
-    if(p.chips === 0 && !p.folded && p.seated){
-      p.chips = (G._onlineLv ? G._onlineLv.buyMax : 10000);
-    }
-  });
   assignPositions();
   computeActionOrders();
   if(dealResult){
@@ -1950,12 +1945,13 @@ function applyFullState(state){
   tryApplyPendingHoles();
 
   render();
-  // ★ 玩家端：结算时自己记一笔（房主端在 endHandHost 里记，这里补玩家）
   const meNow = G.players[G.online.mySeat];
   const handOver = (state.stage === 'showdown' || state.stage === 'waiting' ||
                     (state.nextHandEndsAt && state.nextHandEndsAt > Date.now()));
+  // ★ 关键：handKey 提到外层作用域
+  const handKey = 'h' + G.handNumber;
+
   if(meNow && handOver){
-    const handKey = 'h' + G.handNumber;
     if(G._recordedHandKey !== handKey){
       G._recordedHandKey = handKey;
       const delta = meNow.chips - (G._handStartChips || meNow.chips);
@@ -1985,9 +1981,6 @@ function applyFullState(state){
     }
   } else if(meNow && meNow.chips > 0){
     if(G._rebuyShownFor !== 'h' + G.handNumber) G._rebuyShownFor = 0;
-  }
-  if((G.stage === 'showdown' || (state.nextHandEndsAt && state.nextHandEndsAt > Date.now())) && !G.gameOver){
-    offerShowCards();
   }
 
   const meIdx = G.online.mySeat; 
@@ -2282,18 +2275,34 @@ function handleOnlineMessage(msg){
       updateSpectatorUI();
       syncWaitingSeatsFromRoom();
       render();
-      setTimeout(function(){ if(G.online.started) broadcastFullState(); }, 300);
+
+      // ★ 关键：如果局还在进行，直接接管（不强制回等待）
+      if(G.online.started && G.stage !== 'waiting' && !G.gameOver){
+        // 把离桌的人清掉、把需要行动的玩家推进
+        setTimeout(function(){
+          try { checkRosterSync(); } catch(e){ console.error(e); }
+          broadcastFullState();
+          setTimeout(function(){
+            if(!G.gameOver && G.stage !== 'showdown' && G.stage !== 'waiting'){
+              try { runHostTurn(); } catch(e){ console.error('[became_host] runHostTurn', e); }
+            }
+          }, 300);
+        }, 200);
+      } else {
+        // 局没开或已结束，只广播等待状态
+        setTimeout(function(){ if(G.online.started) broadcastFullState(); }, 300);
+      }
       break;
     }
     case 'host_changed': {
       dropPeer(msg.oldHostPeerId);
       updateSpectatorUI();
-      appToast(isEn() ? "Host changed — game paused" : "房主已变更 —— 对局已暂停", "error");
-      G.stage = 'waiting';
-      G.online.started = false;
-      hideHumanActions();
-      stopTurnTimer();
-      showWaitingBar();
+      appToast(isEn() ? "Host changed" : "房主已变更", "info");
+      // ★ 不强制回等待，等新房主广播 full_state 继续
+      // 只需要把旧房主从座位表清掉、把当前行动者重算
+      if(G.online.started && G.stage !== 'waiting' && !G.gameOver){
+        checkRosterSync();
+      }
       syncWaitingSeatsFromRoom();
       render();
       break;
@@ -3747,7 +3756,6 @@ function renderHumanHand(){
       const cards = G._pendingHoleCards[myPeerId];
       if(cards && cards.length === 2){
         me.holeCards = normalizeCards(cards);
-        delete G._pendingHoleCards[myPeerId];
         G._lastHandSig = '';
       }
     }
