@@ -1345,7 +1345,15 @@ async function callDealerDeal(roomId, handNo){
     body: JSON.stringify({ action: 'deal', room_id: roomId, hand_no: handNo })
   });
   const data = await res.json();
-  if(!data.success) throw new Error(data.error || 'deal failed');
+  if(!data.success){
+    // ★ 409 = 手牌已存在。绝不能 fallback，否则两端会洗出不同的牌
+    if(res.status === 409){
+      const err = new Error('HAND_EXISTS');
+      err.code = 409;
+      throw err;
+    }
+    throw new Error(data.error || 'deal failed');
+  }
   return data;
 }
 
@@ -1371,6 +1379,13 @@ async function decryptMyHoles(myPeerId, holes){
 }
 
 async function startNewHandHost(){
+  // ★ 防重复调用
+  if(G._dealingInProgress){
+    console.warn('[deal] 已有一手在发牌中，跳过');
+    return;
+  }
+  G._dealingInProgress = true;
+
   if(G.online.isHost && window.PokerOnline && PokerOnline._promoteWantingSpectators){
     try { PokerOnline._promoteWantingSpectators(); } catch(e){}
   }
@@ -1387,6 +1402,7 @@ async function startNewHandHost(){
   }
 
   G.handNumber++; G.sessionHands++;
+   const thisHandNo = G.handNumber;
   G.pot = 0; G.community = [];
   G.currentBet = 0; G.lastRaiseAmount = G.bigBlind;
   G.stage = "preflop"; G.busy = false; G._busySince = 0;
@@ -1401,12 +1417,21 @@ async function startNewHandHost(){
       log(isEn() ? 'Waiting for all pubkeys...' : '等待所有玩家公钥就绪...', 'hl');
       await PokerOnline.waitSeatedPubkeys(5000);
       log(isEn() ? 'Requesting deal from server...' : '正在向服务器请求发牌...', 'hl');
-      dealResult = await callDealerDeal(G.online.roomId, G.handNumber);
+      dealResult = await callDealerDeal(G.online.roomId, thisHandNo);   // ★ 用 thisHandNo
       G._encryptedHoles = dealResult.holes;
       G._currentHandId = dealResult.hand_id;
       G._seedCommit = dealResult.seed_commit;
       log(isEn() ? 'Deal received (encrypted)' : '已收到加密牌堆', 'hl');
     } catch(e){
+      if(e.code === 409){
+        // ★ 手牌已存在，本轮作废，不回退本地（回退会让两端状态分裂）
+        console.error('[deal] 手牌已存在，取消本手', e);
+        log(isEn() ? 'Deal conflict, abort this hand' : '发牌冲突，本手作废', 'hl');
+        G._dealingInProgress = false;
+        // 回等待室，重新准备
+        setTimeout(function(){ if(G.online.isHost) returnToWaiting(); }, 1500);
+        return;
+      }
       console.error('[deal] Edge Function 调用失败', e);
       log(isEn() ? 'Server deal failed, fallback to local' : '服务器发牌失败，回退本地', 'hl');
       dealResult = null;
@@ -1437,7 +1462,7 @@ PokerDeck.shuffle(G.deck);   // ★ 无论如何都洗（公共牌用）
       p._waitNextHand = false;
       p._spectator = false;
       p.folded = false;
-      p.chips = G.bigBlind * 100 || 1000;
+      // ★ 删掉 chips 覆盖。新上座玩家的筹码已在 request_seat 里给了
     }
   });
   assignPositions();
@@ -1503,6 +1528,7 @@ PokerDeck.shuffle(G.deck);   // ★ 无论如何都洗（公共牌用）
   startPreflopHost();
   broadcastFullState();
   runHostTurn();
+    G._dealingInProgress = false;
 }
 function startPreflopHost(){
   const n = G.players.length;
