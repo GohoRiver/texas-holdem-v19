@@ -26,7 +26,8 @@ async function upsertMyPubkey(roomId, peerId){
   }
   try {
     const pubJwk = await PokerCrypto.ensureKeyPair(roomId);
-    const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const sb = supabase;                       // ★ 复用全局 client
+    if(!sb){ console.warn('[pubkey] supabase 未初始化'); return; }
     const pubkeyStr = JSON.stringify(pubJwk);
 
     // ★ 步骤 1：确保 rooms 表有这条记录（外键依赖）
@@ -37,17 +38,17 @@ async function upsertMyPubkey(roomId, peerId){
       .maybeSingle();
 
     if(!roomExists){
-      const { error: roomErr } = await sb.from('rooms').insert({
+      const { error: roomErr } = await sb.from('rooms').upsert({
         room_id: roomId,
         mode: roomInfo.mode || 'points',
         level: roomInfo.level || 'nano',
         small_blind: 100,
         big_blind: 200
-      });
-      if(roomErr && roomErr.code !== '23505'){   // 23505 = 并发重复，忽略
-        console.warn('[room] insert 失败', roomErr);
+      }, { onConflict: 'room_id', ignoreDuplicates: true });   // ★ upsert 忽略冲突
+      if(roomErr && roomErr.code !== '23505' && roomErr.code !== '409'){
+        console.warn('[room] upsert 失败', roomErr);
       } else {
-        console.log('[room] 已创建:', roomId);
+        console.log('[room] 已创建/已存在:', roomId);
       }
     }
 
@@ -61,27 +62,20 @@ async function upsertMyPubkey(roomId, peerId){
 
     if(selErr) console.warn('[pubkey] select 失败', selErr);
 
-    if(existing){
-      const { error: updErr } = await sb
-        .from('room_players')
-        .update({ name: nickname, pubkey: pubkeyStr })
-        .eq('room_id', roomId)
-        .eq('peer_id', peerId);
-      if(updErr) console.warn('[pubkey] update 失败', updErr);
-      else console.log('[pubkey] 已更新:', roomId, peerId);
+    const { error: upErr } = await sb
+      .from('room_players')
+      .upsert({
+        room_id: roomId,
+        peer_id: peerId,
+        name: nickname,
+        pubkey: pubkeyStr,
+        seat: 0,
+        chips: 10000
+      }, { onConflict: 'room_id,peer_id' });   // ★ 直接 upsert，不管存不存在
+    if(upErr && upErr.code !== '23505' && upErr.code !== '409'){
+      console.warn('[pubkey] upsert 失败', upErr);
     } else {
-      const { error: insErr } = await sb
-        .from('room_players')
-        .insert({
-          room_id: roomId,
-          peer_id: peerId,
-          name: nickname,
-          pubkey: pubkeyStr,
-          seat: 0,
-          chips: 10000
-        });
-      if(insErr) console.warn('[pubkey] insert 失败', insErr);
-      else console.log('[pubkey] 已插入:', roomId, peerId);
+      console.log('[pubkey] 已 upsert:', roomId, peerId);
     }
   } catch(e){
     console.warn('[pubkey] 异常', e);
@@ -94,9 +88,10 @@ async function upsertMyPubkey(roomId, peerId){
   const ANNOUNCE_MS = 2000;
   const MAX_SEATS = 7;
 
-  async function waitSeatedPubkeys(timeoutMs){
+async function waitSeatedPubkeys(timeoutMs){
   const deadline = Date.now() + (timeoutMs || 4000);
-  const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const sb = supabase;                        // ★ 复用全局 client
+  if(!sb) return false;
   while(Date.now() < deadline){
     const seated = Object.keys(roomPlayers).filter(function(pid){
       return roomPlayers[pid] && roomPlayers[pid].role === 'seated';
@@ -110,7 +105,7 @@ async function upsertMyPubkey(roomId, peerId){
     if(error){ console.warn('[waitPubkeys] query failed', error); return false; }
     const ok = (data || []).every(function(r){ return !!r.pubkey; });
     if(ok) return true;
-    await new Promise(function(r){ setTimeout(r, 250); });
+    await new Promise(function(r){ setTimeout(r, 600); });    // ★ 250 → 600
   }
   console.warn('[waitPubkeys] timeout, some pubkeys missing');
   return false;
@@ -297,6 +292,21 @@ function stopHostScan(){
   if(!isHost) return;
   const p = payload.payload;
   if(!p || !p.peerId) return;
+
+  // ★ 密码校验（只在私人房）
+  if(roomInfo.isPrivate){
+    if(!p.password || p.password !== roomInfo.password){
+      console.log('[join] 密码错，拒绝:', p.peerId);
+      try {
+        channel.send({
+          type:'broadcast',
+          event:'wrong_password',
+          payload:{ peerId: p.peerId }
+        });
+      } catch(e){}
+      return;
+    }
+  }
 
   // ★ 验签逻辑
   let verifiedAddress = null;
@@ -496,16 +506,12 @@ channel.on('broadcast', { event: 'sync_request' }, (payload) => {
 
         return new Promise(function(resolve){
       channel.subscribe(function(status){
-                  // 房主自己每 5 秒更新一下自己的时间戳（虽然扫描跳过自己，但方便将来切换）
-          setInterval(function(){
-            if(roomPlayers[myId]) roomPlayers[myId]._lastSeen = Date.now();
-          }, 5000);
         if(status === 'SUBSCRIBED'){
           roomPlayers[myId] = {
             name: nickname, ready: false, seat: 0,
             role: 'seated', wantsSeat: false, isSelf: true
           };
-                    roomPlayers[myId]._lastSeen = Date.now();
+          roomPlayers[myId]._lastSeen = Date.now();
           broadcastPlayerList();
           notifyPlayers();
           announceRoom();
@@ -514,7 +520,13 @@ channel.on('broadcast', { event: 'sync_request' }, (payload) => {
             announceRoom();
             broadcastPlayerList();
           }, ANNOUNCE_MS);
-                    startHostScan();   // ★ 房主启动心跳扫描
+          startHostScan();
+
+          // ★ 房主自己每 5 秒更新一下自己的时间戳
+          setInterval(function(){
+            if(roomPlayers[myId]) roomPlayers[myId]._lastSeen = Date.now();
+          }, 5000);
+
           resolve();
 
           // ★ 阶段2a：异步生成密钥 + 写入数据库
@@ -522,6 +534,9 @@ channel.on('broadcast', { event: 'sync_request' }, (payload) => {
             try { await upsertMyPubkey(roomId, myId); }
             catch(e){ console.warn('[createRoom] pubkey 写入失败', e); }
           })();
+        }
+        else if(status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED'){
+          console.warn('[room] channel disconnected:', status);
         }
       });
     });
@@ -658,28 +673,44 @@ async function buildJoinPayload(roomId, peerId){
         return new Promise(function(resolve){
       channel.subscribe(async function(status){
         if(status === 'SUBSCRIBED'){
-          roomPlayers[myId] = {
-            name: nickname, ready: false, seat: 0,
-            role: 'seated', wantsSeat: false, isSelf: true
-          };
-          roomPlayers[myId]._lastSeen = Date.now();
-          broadcastPlayerList();
-          notifyPlayers();
-          announceRoom();
-          if(hostAnnounceTimer) clearInterval(hostAnnounceTimer);
-          hostAnnounceTimer = setInterval(function(){
-            announceRoom();
-            broadcastPlayerList();
-          }, ANNOUNCE_MS);
-          startHostScan();
+          // ★ 阶段2a：先写入公钥到数据库
+          try { await upsertMyPubkey(roomId, myId); }
+          catch(e){ console.warn('[joinRoom] pubkey 写入失败', e); }
 
-          // ★ 新增：房主心跳
-          setInterval(function(){
-            if(roomPlayers[myId]) roomPlayers[myId]._lastSeen = Date.now();
+          // ★ 首次进房先签名一次
+          let joinPayload;
+          try {
+            joinPayload = await buildJoinPayload(roomId, myId);
+          } catch(e){
+            console.error('[join] buildJoinPayload failed', e);
+            joinPayload = { peerId: myId, name: nickname, password: roomInfo.password };
+          }
+
+          // ★ 广播 3 次（防止丢包）
+          for(let i = 0; i < 3; i++){
+            setTimeout(function(){
+              send('player_join', joinPayload);
+            }, i * 300);
+          }
+
+          // ★ 加入后立即请求一次同步
+          setTimeout(function(){
+            send('sync_request', { peerId: myId });
+          }, 800);
+          setTimeout(function(){
+            send('sync_request', { peerId: myId });
+          }, 2000);
+
+          // ★ 玩家心跳（5 秒一次，让房主能及时感知）
+          heartbeatTimer = setInterval(function(){
+            if(!channel) return;
+            send('sync_request', { peerId: myId });
           }, 5000);
 
           resolve();
-          
+        }
+        else if(status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED'){
+          console.warn('[room] channel disconnected:', status);
         }
       });
     });

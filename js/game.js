@@ -940,7 +940,18 @@ function fillRoomList(containerId, rooms){
       '<button class="room-item-join">' +
         (isEn() ? 'Join' : '加入') +
       '</button>';
-    const handler = function(e){ if(e && e.stopPropagation) e.stopPropagation(); doJoinRoom(lv, r.mode, r.roomId, ''); };
+    const handler = function(e){
+      if(e && e.stopPropagation) e.stopPropagation();
+      if(window.PokerAudio) PokerAudio.play('click');
+      if(r.isPrivate){
+        const pw = window.prompt(isEn() ? 'Enter room password:' : '请输入房间密码：');
+        if(pw === null) return;
+        if(!pw.trim()){ appToast(isEn() ? 'Password required' : '密码不能为空', 'error'); return; }
+        doJoinRoom(lv, r.mode, r.roomId, pw.trim());
+      } else {
+        doJoinRoom(lv, r.mode, r.roomId, '');
+      }
+    };
     item.querySelector('.room-item-join').onclick = handler;
     item.onclick = handler;
     el.appendChild(item);
@@ -1174,10 +1185,27 @@ function joinRoomByCode(lv, mode){
   const pwInput = $("joinRoomPasswordInput");
   input.value = '';
   pwInput.value = '';
+  pwInput.classList.remove('hidden');   // ★ 默认显示密码框，让用户自己决定填不填
+
+  // ★ 用户输完房间号后，检查已知房间列表，看是不是私人房
+  input.addEventListener('blur', function(){
+    const code = input.value.trim();
+    if(!code) return;
+    let known = null;
+    try {
+      known = (PokerOnline.getKnownRooms() || []).find(function(r){ return r.roomId === code; });
+    } catch(e){}
+    if(known && !known.isPrivate){
+      pwInput.classList.add('hidden');
+    } else {
+      pwInput.classList.remove('hidden');
+    }
+  });
+
   $("joinRoomConfirmBtn").onclick = function(){
     const code = input.value.trim();
     if(!code){ appToast(isEn() ? "Enter a room code" : "请输入房间号", "error"); return; }
-    overlay.classList.add("hidden");
+    overlay.classList.add('hidden');
     doJoinRoom(_pendingJoinLv, _pendingJoinMode, code, pwInput.value.trim());
   };
   $("joinRoomCancelBtn").onclick = function(){ overlay.classList.add('hidden'); };
