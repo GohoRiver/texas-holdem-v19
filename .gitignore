@@ -1,0 +1,12 @@
+# 本地环境
+.vscode/
+node_modules/
+
+# 密钥
+.env
+.dev.vars
+*.pem
+*.key
+
+# Supabase CLI 本地缓存
+supabase/.temp/
