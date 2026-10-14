@@ -568,6 +568,10 @@ channel.on('broadcast', { event: 'sync_request' }, (payload) => {
       if(!isHost) return;
       if(onMessage) onMessage({ type: 'state_request', peerId: payload.payload.peerId });
     });
+    channel.on('broadcast', { event: 'full_state' }, (payload) => {
+      if(onMessage) onMessage({ type: 'full_state', state: payload.payload });
+    });
+
         channel.on('broadcast', { event: 'deal_holes' }, (payload) => {
       if(onMessage) onMessage({ type: 'deal_holes', data: payload.payload });
     });
