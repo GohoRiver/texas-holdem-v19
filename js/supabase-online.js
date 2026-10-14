@@ -979,6 +979,11 @@ function verifyActionSignature(msg){
   const rp = roomPlayers[msg.playerId];
   if(!rp) return { valid: false, reason: 'unknown_peer' };
 
+  // ★ 积分场：不做签名校验，直接放行
+  if(roomInfo.mode !== 'real'){
+    return { valid: true, address: rp.address || null };
+  }
+
   // 玩家没有绑定地址（未签名玩家）
   if(!rp.address){
     if(roomInfo.mode === 'real'){
