@@ -180,6 +180,10 @@ serve(async (req) => {
     switch(action){
       case "deal":
         return await handleDeal(supabase, body);
+      case "deal_community":
+        return await handleDealCommunity(supabase, body);
+      case "reveal":
+        return await handleReveal(supabase, body);
       default:
         return json({ error: "Unknown action: " + action }, 400);
     }
@@ -333,6 +337,15 @@ async function handleDeal(supabase: any, body: any){
     return json({ error: "Insert holes failed: " + holesErr.message }, 500);
   }
 
+  // 9.5 写入 hand_secrets（seed 暂不公开）
+  const { error: secretErr } = await supabase
+    .from("hand_secrets")
+    .insert({ hand_id: handId, seed: seed });
+  if(secretErr){
+    console.error("[deal] insert hand_secrets failed:", secretErr);
+    return json({ error: "Insert hand_secrets failed: " + secretErr.message }, 500);
+  }
+
   // 10. 返回给调用者
   return json({
     success: true,
@@ -349,5 +362,141 @@ async function handleDeal(supabase: any, body: any){
     players: players.map(p => ({
       peer_id: p.peer_id, seat: p.seat, name: p.name
     }))
+  });
+}
+
+// ============================================================
+// deal_community：翻牌 / 转牌 / 河牌
+// ============================================================
+
+async function handleDealCommunity(supabase: any, body: any){
+  const { room_id, hand_no, stage } = body;
+
+  if(!room_id || typeof hand_no !== "number" || !stage){
+    return json({ error: "Missing room_id, hand_no or stage" }, 400);
+  }
+
+  // 1. 读当前手牌
+  const { data: hand, error: handErr } = await supabase
+    .from("hands")
+    .select("*")
+    .eq("room_id", room_id)
+    .eq("hand_no", hand_no)
+    .maybeSingle();
+  if(handErr || !hand){
+    return json({ error: "Hand not found" }, 404);
+  }
+
+  const snapshot = hand.state_snapshot || {};
+  const deckRemaining: Card[] = Array.isArray(snapshot.deck_remaining)
+    ? snapshot.deck_remaining.slice()
+    : [];
+  const communityCards: Card[] = Array.isArray(hand.community_cards)
+    ? hand.community_cards.slice()
+    : [];
+  const currentStage: string = hand.stage || "preflop";
+
+  // 2. 校验阶段连续性并决定取牌数
+  let drawCount = 0;
+  if(currentStage === "preflop" && stage === "flop") drawCount = 3;
+  else if(currentStage === "flop" && stage === "turn") drawCount = 1;
+  else if(currentStage === "turn" && stage === "river") drawCount = 1;
+  else return json({ error: "Invalid stage transition" }, 400);
+
+  if(deckRemaining.length < drawCount){
+    return json({ error: "Not enough cards in deck" }, 500);
+  }
+
+  // 3. 从牌堆前部取牌
+  const newCards = deckRemaining.splice(0, drawCount);
+  const updatedCommunity = communityCards.concat(newCards);
+
+  // 4. 更新 hands 表
+  const { error: updErr } = await supabase
+    .from("hands")
+    .update({
+      community_cards: updatedCommunity,
+      stage: stage,
+      state_snapshot: Object.assign({}, snapshot, { deck_remaining: deckRemaining })
+    })
+    .eq("hand_id", hand.hand_id);
+  if(updErr){
+    console.error("[deal_community] update failed:", updErr);
+    return json({ error: "Update failed: " + updErr.message }, 500);
+  }
+
+  return json({
+    success: true,
+    stage: stage,
+    new_cards: newCards,
+    community_cards: updatedCommunity
+  });
+}
+
+// ============================================================
+// reveal：手牌结束后公开 seed
+// ============================================================
+
+async function handleReveal(supabase: any, body: any){
+  const { room_id, hand_no } = body;
+
+  if(!room_id || typeof hand_no !== "number"){
+    return json({ error: "Missing room_id or hand_no" }, 400);
+  }
+
+  // 1. 读 hands
+  const { data: hand, error: handErr } = await supabase
+    .from("hands")
+    .select("hand_id, seed_commit, seed_revealed")
+    .eq("room_id", room_id)
+    .eq("hand_no", hand_no)
+    .maybeSingle();
+  if(handErr || !hand){
+    return json({ error: "Hand not found" }, 404);
+  }
+
+  // 2. 已公开过 → 直接返回
+  if(hand.seed_revealed){
+    return json({
+      success: true,
+      seed: hand.seed_revealed,
+      seed_commit: hand.seed_commit,
+      already: true
+    });
+  }
+
+  // 3. 读 hand_secrets
+  const { data: secret, error: secretErr } = await supabase
+    .from("hand_secrets")
+    .select("seed")
+    .eq("hand_id", hand.hand_id)
+    .maybeSingle();
+  if(secretErr || !secret){
+    return json({ error: "Secret not found" }, 500);
+  }
+
+  // 4. 更新 hands.seed_revealed
+  const { error: updErr } = await supabase
+    .from("hands")
+    .update({ seed_revealed: secret.seed })
+    .eq("hand_id", hand.hand_id);
+  if(updErr){
+    console.error("[reveal] update hands failed:", updErr);
+    return json({ error: "Update hands failed: " + updErr.message }, 500);
+  }
+
+  // 5. 标记 hand_secrets.revealed_at
+  const { error: markErr } = await supabase
+    .from("hand_secrets")
+    .update({ revealed_at: new Date().toISOString() })
+    .eq("hand_id", hand.hand_id);
+  if(markErr){
+    console.warn("[reveal] mark revealed_at failed:", markErr);
+  }
+
+  return json({
+    success: true,
+    seed: secret.seed,
+    seed_commit: hand.seed_commit
   });
 }
