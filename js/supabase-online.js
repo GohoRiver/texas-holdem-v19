@@ -783,10 +783,12 @@ async function buildJoinPayload(roomId, peerId){
     channel.on('broadcast', { event: 'full_state' }, (payload) => {
       if(onMessage) onMessage({ type: 'full_state', state: payload.payload });
     });
+    
         channel.on('broadcast', { event: 'deal_holes' }, (payload) => {
       // 客户端收到房主广播的加密底牌
       if(onMessage) onMessage({ type: 'deal_holes', data: payload.payload });
     });
+
     channel.on('broadcast', { event: 'player_action' }, (payload) => {
       if(!isHost) return;
       if(onMessage) onMessage({ type: 'player_action', ...payload.payload });
@@ -977,11 +979,6 @@ function verifyActionSignature(msg){
   const rp = roomPlayers[msg.playerId];
   if(!rp) return { valid: false, reason: 'unknown_peer' };
 
-  // 非真金房：不强制验签，直接放行
-  if(roomInfo.mode !== 'real'){
-    return { valid: true, address: rp.address || null };
-  }
-
   // 玩家没有绑定地址（未签名玩家）
   if(!rp.address){
     if(roomInfo.mode === 'real'){
@@ -1139,44 +1136,6 @@ resetActionSeq();
   currentRoomId = null; isHost = false; roomPlayers = {}; hostPeerId = null;
 }
 
-  async function isMyWalletBound(){
-    try {
-      if(!myAuthUid) return false;
-      const r = await supabase.from('player_wallets').select('wallet_address').eq('auth_uid', myAuthUid).maybeSingle();
-      if(r.error){ console.warn('[bind-check] query failed', r.error); return false; }
-      return !!(r.data && r.data.wallet_address);
-    } catch(e){
-      console.warn('[bind-check] error', e);
-      return false;
-    }
-  }
-
-  async function bindWalletToAuth(walletAddress, message, signature){
-    try {
-      const sess = await supabase.auth.getSession();
-      if(!sess.data.session || !sess.data.session.access_token){
-        return { success: false, error: 'no_session' };
-      }
-      const res = await fetch(SUPABASE_URL + '/functions/v1/bind-wallet', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + sess.data.session.access_token,
-          'apikey': SUPABASE_ANON_KEY
-        },
-        body: JSON.stringify({
-          wallet_address: walletAddress,
-          message: message,
-          signature: signature
-        })
-      });
-      return await res.json();
-    } catch(e){
-      console.error('[bind] 调用失败', e);
-      return { success: false, error: 'network_error', detail: String(e) };
-    }
-  }
-
   return {
     init, createRoom, joinRoom, leaveRoom, send,
     sendFullState, sendPlayerAction, sendGameStart, sendHostLeft,
@@ -1199,8 +1158,6 @@ resetActionSeq();
     getHostPeerId: function(){ return hostPeerId; },
     getKnownRooms, isHost: function(){ return isHost; },
     sendPlayerActionSigned,    // ★ 新增
-    bindWalletToAuth,
-    isMyWalletBound,
   verifyActionSignature,     // ★ 新增
   resetActionSeq,             // ★ 新增
       waitSeatedPubkeys,
