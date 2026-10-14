@@ -1267,7 +1267,7 @@ function runHostTurn(){
   }
 }
 
-function advanceStageHost(){
+async function advanceStageHost(){
   stopTurnTimer();
   clearAllGameTimers();
   checkRosterSync();
@@ -1292,21 +1292,42 @@ function advanceStageHost(){
   G.currentBet = 0; G.lastRaiseAmount = G.bigBlind;
   G.raiseCount = 0;
 
-  if(boardLen === 0){
-    G.stage = "flop";
-    G.community.push(G.deck.pop(), G.deck.pop(), G.deck.pop());
-    log(t("flopIs",{cards:G.community.map(function(c){return c.display;}).join("  ")}), "hl");
-  } else if(boardLen === 3){
-    G.stage = "turn";
-    G.community.push(G.deck.pop());
-    log(t("turnIs",{card:G.community[G.community.length-1].display}), "hl");
-  } else if(boardLen === 4){
-    G.stage = "river";
-    G.community.push(G.deck.pop());
-    log(t("riverIs",{card:G.community[G.community.length-1].display}), "hl");
-  } else {
+  if(boardLen !== 0 && boardLen !== 3 && boardLen !== 4){
     showdownHost();
     return;
+  }
+
+  const stageName = boardLen === 0 ? 'flop' : (boardLen === 3 ? 'turn' : 'river');
+
+  let cardsFromDealer = null;
+  if(G.online.active && G.online.isHost && G._currentHandId && G.online.roomId){
+    try {
+      const r = await callDealerCommunity(G.online.roomId, G.handNumber, stageName);
+      cardsFromDealer = normalizeCards(r.new_cards || []);
+      if(!cardsFromDealer || cardsFromDealer.length === 0) cardsFromDealer = null;
+    } catch(e){
+      console.error('[advanceStageHost] dealer_community 失败，回退本地', e);
+      cardsFromDealer = null;
+    }
+  }
+
+  G.stage = stageName;
+  if(cardsFromDealer){
+    cardsFromDealer.forEach(function(c){ G.community.push(c); });
+  } else {
+    if(stageName === 'flop'){
+      G.community.push(G.deck.pop(), G.deck.pop(), G.deck.pop());
+    } else {
+      G.community.push(G.deck.pop());
+    }
+  }
+
+  if(stageName === 'flop'){
+    log(t("flopIs",{cards:G.community.map(function(c){return c.display;}).join("  ")}), "hl");
+  } else if(stageName === 'turn'){
+    log(t("turnIs",{card:G.community[G.community.length-1].display}), "hl");
+  } else {
+    log(t("riverIs",{card:G.community[G.community.length-1].display}), "hl");
   }
 
   PokerAudio.play('deal');
