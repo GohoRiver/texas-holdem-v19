@@ -1142,6 +1142,7 @@ resetActionSeq();
     requestState,
     setMessageCallback, setPlayersCallback, setRoomsCallback, toggleReady,
     becomeHost,
+    tryStartGame,
     getChannel: function(){ return channel; },
     getMyAuthUid: function(){ return myAuthUid; },
     getMyId: function(){ return myId; },
