@@ -575,6 +575,54 @@ channel.on('broadcast', { event: 'sync_request' }, (payload) => {
         channel.on('broadcast', { event: 'deal_holes' }, (payload) => {
       if(onMessage) onMessage({ type: 'deal_holes', data: payload.payload });
     });
+    /* ===== 补齐客户端监听器（房主转让后老房主会用上）===== */
+    channel.on('broadcast', { event: 'kicked' }, (payload) => {
+      if(payload.payload.peerId === myId){
+        if(onMessage) onMessage({ type: 'kicked', reason: payload.payload.reason || 'unknown' });
+      }
+    });
+
+    channel.on('broadcast', { event: 'wrong_password' }, (payload) => {
+      if(payload.payload.peerId === myId){
+        if(onMessage) onMessage({ type: 'wrong_password' });
+      }
+    });
+
+    channel.on('broadcast', { event: 'host_transferred' }, (payload) => {
+      const newHostId = payload.payload.newHostPeerId;
+      const oldHostId = payload.payload.oldHostPeerId;
+      if(oldHostId && roomPlayers[oldHostId]) delete roomPlayers[oldHostId];
+      if(newHostId === myId){
+        if(!isHost) becomeHost();
+        if(onMessage) onMessage({ type: 'became_host', oldHostPeerId: oldHostId });
+      } else {
+        if(isHost){
+          console.log('[host] host_transferred 确认降级');
+          isHost = false;
+          hostPeerId = newHostId;
+          stopAnnounce();
+          stopHostScan();
+        }
+        if(onMessage) onMessage({ type: 'host_changed', peerId: newHostId, oldHostPeerId: oldHostId });
+      }
+      notifyPlayers();
+    });
+
+    channel.on('broadcast', { event: 'player_leave' }, (payload) => {
+      if(onMessage) onMessage({ type: 'player_leave', peerId: payload.payload.peerId });
+    });
+
+    channel.on('broadcast', { event: 'room_full' }, (payload) => {
+      if(payload.payload.peerId === myId){ if(onMessage) onMessage({ type: 'room_full' }); }
+    });
+
+    channel.on('broadcast', { event: 'host_left' }, (payload) => {
+      if(onMessage) onMessage({ type: 'host_left' });
+    });
+
+    channel.on('broadcast', { event: 'game_start' }, (payload) => {
+      if(onMessage) onMessage({ type: 'game_start', ...payload.payload });
+    });
 
     hostRoomInfo = {
       roomId: roomId,
