@@ -10,6 +10,24 @@
     return window.PokerI18n ? PokerI18n.t(k) : k;
   }
 
+  async function bindWalletToAuth(){
+    if(!window.PokerOnline || !PokerOnline.getMyAuthUid || !PokerOnline.bindWalletToAuth) return;
+    const authUid = PokerOnline.getMyAuthUid();
+    if(!authUid) return;
+    if(!window.PokerWallet || !PokerWallet.isConnected()) return;
+    const walletLower = String(PokerWallet.getAddress() || '').toLowerCase();
+    if(!walletLower) return;
+    const timestamp = Date.now();
+    const message = 'Tapeout Bracelet Wallet Binding v1\nAuthUid: ' + authUid + '\nWallet: ' + walletLower + '\nTimestamp: ' + timestamp;
+    try {
+      const signature = await PokerWallet.signMessage(message);
+      const res = await PokerOnline.bindWalletToAuth(walletLower, message, signature);
+      console.log('[bind] 绑定结果:', res);
+    } catch(e){
+      console.warn('[bind] 签名或绑定失败', e);
+    }
+  }
+
   async function doConnect(){
     console.log('[Wallet] 点击连接钱包');
 
@@ -55,6 +73,7 @@
         if(ov) ov.classList.add('hidden');
         // 通知 game.js 刷新余额（如果它绑定了监听）
         window.dispatchEvent(new Event('walletConnected'));
+        await bindWalletToAuth();
       }
     } catch(e){
       console.error('[Wallet] connect 出错:', e);
