@@ -44,6 +44,10 @@ function showWaitingBar(){
           topReady.style.cursor = 'not-allowed';
           topReady.textContent = isEn() ? 'Connect wallet to ready' : '请先连接并签名钱包';
           topReady.onclick = null;
+        } else {
+          topReady.disabled = false;
+          topReady.style.opacity = '';
+          topReady.style.cursor = '';
         }
       }).catch(function(){});
     }
