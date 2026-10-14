@@ -210,6 +210,7 @@ function broadcastFullState(){
         holeCards: safeHoleCards,
         holeCardCount: (p.holeCards && p.holeCards.length) || 0,
         lastAction: p.lastAction,
+                needsToAct: p.needsToAct || false,
         position: p.position, positionKey: p.positionKey,
         revealCards: p.revealCards,
         _intentReveal: p._intentReveal || false,
@@ -321,6 +322,7 @@ function applyFullState(state){
     }
     p._holeCardCount = sp.holeCardCount || (sp.holeCards ? sp.holeCards.length : 0);
     p.lastAction = sp.lastAction;
+        p.needsToAct = sp.needsToAct || false;
     p.position = sp.position; p.positionKey = sp.positionKey;
     p.revealCards = sp.revealCards;
     p._intentReveal = sp._intentReveal || false;

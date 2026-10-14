@@ -787,6 +787,10 @@ async function buildJoinPayload(roomId, peerId){
       // 客户端收到房主广播的加密底牌
       if(onMessage) onMessage({ type: 'deal_holes', data: payload.payload });
     });
+    channel.on('broadcast', { event: 'player_action' }, (payload) => {
+      if(!isHost) return;
+      if(onMessage) onMessage({ type: 'player_action', ...payload.payload });
+    });
 
     channel.on('broadcast', { event: 'chat' }, (payload) => {
       if(onMessage) onMessage({ type: 'chat', ...payload.payload });
