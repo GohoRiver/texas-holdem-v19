@@ -310,6 +310,33 @@ function stopHostScan(){
 
     channel = supabase.channel('room-' + roomId, { config: { broadcast: { self: true } } });
 
+    channel.on('broadcast', { event: 'player_list' }, (payload) => {
+      const pl = payload.payload;
+      if(!pl || !pl.players) return;
+      if(pl.hostPeerId && pl.hostPeerId !== myId && isHost){
+        console.log('[host] 收到新房主广播，本地降级为非房主');
+        isHost = false;
+        hostPeerId = pl.hostPeerId;
+        stopAnnounce();
+        stopHostScan();
+      }
+      if(isHost) return;
+      roomPlayers = {};
+      (pl.players || []).forEach(function(p){
+        roomPlayers[p.peerId] = {
+          name: p.name, ready: p.ready, seat: p.seat,
+          role: p.role || 'seated', wantsSeat: !!p.wantsSeat,
+          address: p.address || null,
+          pubkey: p.pubkey || null,
+          isSelf: p.peerId === myId
+        };
+      });
+      roomInfo.isPrivate = !!pl.isPrivate;
+      roomInfo.gameStarted = !!pl.gameStarted;
+      notifyPlayers();
+      if(onMessage) onMessage({ type: 'player_list_updated' });
+    });
+
             channel.on('broadcast', { event: 'player_join' }, (payload) => {
   if(!isHost) return;
   const p = payload.payload;
