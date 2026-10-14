@@ -728,6 +728,16 @@ async function buildJoinPayload(roomId, peerId){
           // ★ 阶段2a：先写入公钥到数据库
           try { await upsertMyPubkey(roomId, myId); }
           catch(e){ console.warn('[joinRoom] pubkey 写入失败', e); }
+          (async function(){
+            try {
+              const roomQuery = await supabase.from('rooms').select('owner_id').eq('room_id', roomId).maybeSingle();
+              const roomRow = roomQuery && roomQuery.data;
+              if(roomRow && roomRow.owner_id && myAuthUid && String(roomRow.owner_id) === String(myAuthUid)){
+                console.log('[room] 检测到 owner_id 匹配，恢复房主身份');
+                if(onMessage) onMessage({ type: 'became_host', oldHostPeerId: null });
+              }
+            } catch(e){ console.warn('[room] 恢复房主检测失败', e); }
+          })();
 
           // ★ 首次进房先签名一次
           let joinPayload;
