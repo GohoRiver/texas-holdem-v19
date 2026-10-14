@@ -1047,8 +1047,14 @@ function resetActionSeq(){
     if(!me) return false;
     if(me.role !== 'seated') return false;
     me.ready = !me.ready;
-    send('ready', { peerId: myId, ready: me.ready });
-    notifyPlayers();
+    if(isHost){
+      broadcastPlayerList();
+      notifyPlayers();
+      tryStartGame();
+    } else {
+      send('ready', { peerId: myId, ready: me.ready });
+      notifyPlayers();
+    }
     return me.ready;
   }
 
