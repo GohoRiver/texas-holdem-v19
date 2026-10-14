@@ -612,6 +612,14 @@ channel.on('broadcast', { event: 'sync_request' }, (payload) => {
         }
         else if(status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED'){
           console.warn('[room] channel disconnected:', status);
+          setTimeout(function(){
+            try {
+              if(channel && channel.state === 'closed'){
+                console.log('[room] 尝试自动重连...');
+                channel.subscribe();
+              }
+            } catch(e){ console.warn('[room] 重连异常', e); }
+          }, 3000);
         }
       });
     });
@@ -840,6 +848,14 @@ async function buildJoinPayload(roomId, peerId){
         }
         else if(status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED'){
           console.warn('[room] channel disconnected:', status);
+          setTimeout(function(){
+            try {
+              if(channel && channel.state === 'closed'){
+                console.log('[room] 尝试自动重连...');
+                channel.subscribe();
+              }
+            } catch(e){ console.warn('[room] 重连异常', e); }
+          }, 3000);
         }
       });
     });
