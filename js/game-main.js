@@ -258,6 +258,7 @@ document.addEventListener("DOMContentLoaded", function(){
   window.addEventListener('walletConnected', function(){
     try { refreshBalanceUI(); } catch(e){ console.warn(e); }
     if(window.PokerWallet) PokerWallet.updateUI();
+    if(G.online.active && G.gameMode === 'real'){ try { showWaitingBar(); } catch(e){} }
   });
 
   const back = $("backToLobbyBtn");
