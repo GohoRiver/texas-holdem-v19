@@ -115,7 +115,7 @@ function returnToWaiting(){
   stopTurnTimer();
   hideNextHandToast();
   G.online.started = false; G.stage = 'waiting';
-  G.pot = 0; G.currentBet = 0; G.community = []; G.handNumber = 0;
+  G.pot = 0; G.currentBet = 0; G.community = [];
   G.gameOver = false; G.busy = false; G._busySince = 0;
   G.dealerIndex = 0; G.currentPlayerIndex = 0;
   G._nextHandEndsAt = 0; G._turnEndsAt = 0;
