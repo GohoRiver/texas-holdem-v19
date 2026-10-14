@@ -36,6 +36,17 @@ function showWaitingBar(){
       topReady.classList.toggle('cancel', !!nowReady);
       updateWaitingBar();
     };
+    if(G.gameMode === 'real' && window.PokerOnline && PokerOnline.isMyWalletBound){
+      PokerOnline.isMyWalletBound().then(function(bound){
+        if(!bound){
+          topReady.disabled = true;
+          topReady.style.opacity = '0.5';
+          topReady.style.cursor = 'not-allowed';
+          topReady.textContent = isEn() ? 'Connect wallet to ready' : '请先连接并签名钱包';
+          topReady.onclick = null;
+        }
+      }).catch(function(){});
+    }
   }
 
   const leaveBtn = document.getElementById('waitingLeaveBtn');
