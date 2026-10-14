@@ -29,8 +29,8 @@ window.PokerDeck = (function(){
   }
 
   function keccak256OfString(str){
-    if(!window.ethers) throw new Error('ethers not loaded');
     const bytes = new TextEncoder().encode(str);
+    if(!window.ethers || !window.ethers.keccak256) throw new Error('ethers not loaded');
     return window.ethers.keccak256(bytes);
   }
 
@@ -38,7 +38,8 @@ window.PokerDeck = (function(){
     const a = arr.slice();
     for(let i = a.length - 1; i > 0; i--){
       const hash = keccak256OfString(seedHex + ':' + (a.length - i));
-      const big = BigInt('0x' + hash.slice(2, 15));
+      const hex = hash.startsWith('0x') ? hash.slice(2) : hash;
+      const big = BigInt('0x' + hex.slice(0, 13));
       const j = Number(big % BigInt(i + 1));
       const t = a[i]; a[i] = a[j]; a[j] = t;
     }
