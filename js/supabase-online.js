@@ -499,6 +499,7 @@ function stopHostScan(){
       broadcastPlayerList();
       startHostScan();
       if(onMessage) onMessage({ type: 'became_host', oldHostPeerId: null });
+      setTimeout(function(){ if(isHost) tryStartGame(); }, 200);
     });
 
     /* ★ 房主切换私人/公开 */
