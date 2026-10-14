@@ -691,6 +691,10 @@ function handleOnlineMessage(msg){
     case 'became_host': {
       G.online.isHost = true;
       dropPeer(msg.oldHostPeerId);
+      if(G.stage !== 'waiting' && G.stage !== 'showdown'){
+        console.log('[became_host] 强制回到等待室以避免状态不全');
+        returnToWaiting();
+      }
       if(window.PokerOnline && PokerOnline.becomeHost){
         try { PokerOnline.becomeHost(); } catch(e){}
       }
