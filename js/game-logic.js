@@ -796,6 +796,16 @@ function offerShowCards(){
 
 function showRebuy(){
   stopTurnTimer();
+  let meNow = null;
+  if(G.online.active && window.PokerOnline && PokerOnline.getMyId){
+    meNow = G.players.find(function(p){ return p.peerId === PokerOnline.getMyId(); });
+  }
+  if(!meNow) meNow = G.players[myIndex()];
+  if(meNow && meNow.chips > 0){
+    console.log('[rebuy] 当前筹码 > 0，跳过补码弹窗');
+    G._rebuyShownFor = 0;
+    return;
+  }
   const lv = G._onlineLv || LEVELS.find(function(l){ return l.key === G.tableMode; }) || LEVELS[0];
   const minBuy = lv.buyMin;
   G._rebuyMultiplier = minBuy;
