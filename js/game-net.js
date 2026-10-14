@@ -715,6 +715,7 @@ function handleOnlineMessage(msg){
         }, 200);
       } else {
         setTimeout(function(){ if(G.online.started) broadcastFullState(); }, 300);
+        setTimeout(function(){ try { if(window.PokerOnline && PokerOnline.tryStartGame){ console.log('[became_host] 主动检查开局'); PokerOnline.tryStartGame(); } } catch(e){ console.warn('[became_host] tryStartGame', e); } }, 700);
       }
       break;
     }
