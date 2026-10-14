@@ -1120,6 +1120,7 @@ resetActionSeq();
     requestState,
     setMessageCallback, setPlayersCallback, setRoomsCallback, toggleReady,
     becomeHost,
+    getChannel: function(){ return channel; },
     getMyAuthUid: function(){ return myAuthUid; },
     getMyId: function(){ return myId; },
     getRoomId: function(){ return currentRoomId; },
