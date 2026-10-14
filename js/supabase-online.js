@@ -662,6 +662,34 @@ async function buildJoinPayload(roomId, peerId){
       }
     });
 
+    /* ★ 房主转让（接收方） */
+    channel.on('broadcast', { event: 'transfer_host' }, (payload) => {
+      const targetId = payload.payload && payload.payload.peerId;
+      if(!targetId || targetId !== myId) return;
+      if(isHost) return;
+      console.log('[transfer] 收到房主转让，成为新房主');
+      isHost = true;
+      hostPeerId = myId;
+      try {
+        channel.send({ type:'broadcast', event:'host_transferred', payload:{ newHostPeerId: myId, oldHostPeerId: null } });
+      } catch(e){}
+      if(!hostRoomInfo){
+        hostRoomInfo = {
+          roomId: currentRoomId,
+          level: roomInfo.level || 'nano', mode: roomInfo.mode || 'points',
+          hostName: nickname, count: 1, totalPlayers: 1, maxSeats: MAX_SEATS,
+          isPrivate: roomInfo.isPrivate, gameStarted: roomInfo.gameStarted
+        };
+      }
+      if(hostAnnounceTimer) clearInterval(hostAnnounceTimer);
+      hostAnnounceTimer = setInterval(announceRoom, ANNOUNCE_MS);
+      announceRoom();
+      broadcastPlayerList();
+      notifyPlayers();
+      startHostScan();
+      if(onMessage) onMessage({ type: 'became_host', oldHostPeerId: null });
+    });
+
     /* ★ 房主变更 */
     channel.on('broadcast', { event: 'host_transferred' }, (payload) => {
       const newHostId = payload.payload.newHostPeerId;
