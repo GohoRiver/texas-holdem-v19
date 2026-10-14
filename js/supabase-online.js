@@ -1134,6 +1134,18 @@ resetActionSeq();
   currentRoomId = null; isHost = false; roomPlayers = {}; hostPeerId = null;
 }
 
+  async function isMyWalletBound(){
+    try {
+      if(!myAuthUid) return false;
+      const r = await supabase.from('player_wallets').select('wallet_address').eq('auth_uid', myAuthUid).maybeSingle();
+      if(r.error){ console.warn('[bind-check] query failed', r.error); return false; }
+      return !!(r.data && r.data.wallet_address);
+    } catch(e){
+      console.warn('[bind-check] error', e);
+      return false;
+    }
+  }
+
   async function bindWalletToAuth(walletAddress, message, signature){
     try {
       const sess = await supabase.auth.getSession();
@@ -1183,6 +1195,7 @@ resetActionSeq();
     getKnownRooms, isHost: function(){ return isHost; },
     sendPlayerActionSigned,    // ★ 新增
     bindWalletToAuth,
+    isMyWalletBound,
   verifyActionSignature,     // ★ 新增
   resetActionSeq,             // ★ 新增
       waitSeatedPubkeys,
