@@ -1497,6 +1497,28 @@ function resolveHost(cont){
 
 function endHandHost(totalPot){
   clearAllGameTimers();
+  if(G.online.active && G.online.isHost && G._currentHandId && G.online.roomId){
+    const capturedHandNo = G.handNumber;
+    callDealerReveal(G.online.roomId, capturedHandNo).then(function(r){
+      try {
+        const seed = r.seed;
+        const commit = r.seed_commit;
+        if(!seed || !commit){ console.warn('[verify] reveal 返回不完整', r); return; }
+        if(!window.ethers || !window.ethers.keccak256){ console.warn('[verify] ethers 未加载，跳过验证'); return; }
+        const computed = window.ethers.keccak256(new TextEncoder().encode(seed));
+        const seedOk = (computed.toLowerCase() === commit.toLowerCase());
+        console.log('[verify] hand #' + capturedHandNo + ' seed=' + seed + ' commit=' + commit + ' computed=' + computed + ' ok=' + seedOk);
+        G._lastSeedRevealed = seed;
+        G._lastSeedCommit = commit;
+        G._lastSeedVerified = seedOk;
+        if(seedOk){
+          log(isEn() ? ' Hand verified: seed matches commit' : ' 本手已验证：seed 与 commit 一致', 'hl');
+        } else {
+          log(isEn() ? ' Hand verification FAILED' : ' 本手验证失败：seed 与 commit 不一致！', 'hl');
+        }
+      } catch(e){ console.error('[verify] 校验异常', e); }
+    }).catch(function(e){ console.warn('[reveal] 调用失败（dealer 未响应）', e); });
+  }
   const me = G.players[G.online.mySeat];
   if(me){
     const delta = me.chips - G.playerHandStartChips;
