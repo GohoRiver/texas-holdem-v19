@@ -1134,6 +1134,32 @@ resetActionSeq();
   currentRoomId = null; isHost = false; roomPlayers = {}; hostPeerId = null;
 }
 
+  async function bindWalletToAuth(walletAddress, message, signature){
+    try {
+      const sess = await supabase.auth.getSession();
+      if(!sess.data.session || !sess.data.session.access_token){
+        return { success: false, error: 'no_session' };
+      }
+      const res = await fetch(SUPABASE_URL + '/functions/v1/bind-wallet', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + sess.data.session.access_token,
+          'apikey': SUPABASE_ANON_KEY
+        },
+        body: JSON.stringify({
+          wallet_address: walletAddress,
+          message: message,
+          signature: signature
+        })
+      });
+      return await res.json();
+    } catch(e){
+      console.error('[bind] 调用失败', e);
+      return { success: false, error: 'network_error', detail: String(e) };
+    }
+  }
+
   return {
     init, createRoom, joinRoom, leaveRoom, send,
     sendFullState, sendPlayerAction, sendGameStart, sendHostLeft,
@@ -1156,6 +1182,7 @@ resetActionSeq();
     getHostPeerId: function(){ return hostPeerId; },
     getKnownRooms, isHost: function(){ return isHost; },
     sendPlayerActionSigned,    // ★ 新增
+    bindWalletToAuth,
   verifyActionSignature,     // ★ 新增
   resetActionSeq,             // ★ 新增
       waitSeatedPubkeys,
