@@ -499,7 +499,7 @@ function stopHostScan(){
       broadcastPlayerList();
       startHostScan();
       if(onMessage) onMessage({ type: 'became_host', oldHostPeerId: null });
-      setTimeout(function(){ if(isHost) tryStartGame(); }, 200);
+      setTimeout(function(){ const seatedList = Object.keys(roomPlayers).filter(function(pid){ return roomPlayers[pid].role === 'seated'; }); console.log('[transfer-diag] isHost='+isHost+' seated='+seatedList.length+' readies='+seatedList.map(function(pid){ return roomPlayers[pid].ready ? 1 : 0; }).join(',')); if(isHost) tryStartGame(); }, 300);
     });
 
     /* ★ 房主切换私人/公开 */
@@ -1081,14 +1081,15 @@ function resetActionSeq(){
   function sendKick(peerId){ send('kick_player', { peerId: peerId }); }
   function sendTransferHost(peerId){
     if(!isHost) return;
+    console.log('[transfer] 发起房主转让给:', peerId);
+    broadcastPlayerList();
+    send('transfer_host', { peerId: peerId });
+    send('host_transferred', { newHostPeerId: peerId, oldHostPeerId: myId });
     isHost = false;
+    hostPeerId = peerId;
     stopAnnounce();
     stopHostScan();
-    hostPeerId = peerId;
-    broadcastPlayerList();
-    notifyPlayers();
     if(onMessage) onMessage({ type: 'host_changed_local', newHostPeerId: peerId });
-    send('transfer_host', { peerId: peerId });
   }
   function sendTogglePrivate(isPrivate){ send('toggle_private', { isPrivate: isPrivate }); }
 
