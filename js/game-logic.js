@@ -1006,6 +1006,40 @@ async function callDealerDeal(roomId, handNo){
   return data;
 }
 
+async function callDealerCommunity(roomId, handNo, stage){
+  const res = await fetch(SUPABASE_URL_DEALER + '/functions/v1/dealer', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'apikey': SUPABASE_KEY_DEALER,
+      'Authorization': 'Bearer ' + SUPABASE_KEY_DEALER
+    },
+    body: JSON.stringify({ action: 'deal_community', room_id: roomId, hand_no: handNo, stage: stage })
+  });
+  const data = await res.json();
+  if(!data.success){
+    throw new Error(data.error || 'deal_community failed');
+  }
+  return data;
+}
+
+async function callDealerReveal(roomId, handNo){
+  const res = await fetch(SUPABASE_URL_DEALER + '/functions/v1/dealer', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'apikey': SUPABASE_KEY_DEALER,
+      'Authorization': 'Bearer ' + SUPABASE_KEY_DEALER
+    },
+    body: JSON.stringify({ action: 'reveal', room_id: roomId, hand_no: handNo })
+  });
+  const data = await res.json();
+  if(!data.success){
+    throw new Error(data.error || 'reveal failed');
+  }
+  return data;
+}
+
 async function decryptMyHoles(myPeerId, holes){
   const myHole = holes[myPeerId];
   if(!myHole){
