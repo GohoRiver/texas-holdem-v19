@@ -449,17 +449,29 @@ function stopHostScan(){
 
     /* ★ 房主转让 */
     channel.on('broadcast', { event: 'transfer_host' }, (payload) => {
-      if(!isHost) return;
-      const targetId = payload.payload.peerId;
-      if(!roomPlayers[targetId]) return;
-      hostPeerId = targetId;
-      isHost = false;
-      try { channel.send({ type:'broadcast', event:'host_transferred', payload:{ newHostPeerId: targetId } }); } catch(e){}
-      /* 停止自己的公告 */
-      stopAnnounce();
+      const targetId = payload.payload && payload.payload.peerId;
+      if(!targetId || targetId !== myId) return;
+      if(isHost) return;
+      console.log('[transfer] 收到房主转让，成为新房主');
+      isHost = true;
+      hostPeerId = myId;
+      try {
+        channel.send({ type:'broadcast', event:'host_transferred', payload:{ newHostPeerId: myId, oldHostPeerId: null } });
+      } catch(e){}
+      if(!hostRoomInfo){
+        hostRoomInfo = {
+          roomId: currentRoomId,
+          level: roomInfo.level || 'nano', mode: roomInfo.mode || 'points',
+          hostName: nickname, count: 1, totalPlayers: 1, maxSeats: MAX_SEATS,
+          isPrivate: roomInfo.isPrivate, gameStarted: roomInfo.gameStarted
+        };
+      }
+      if(hostAnnounceTimer) clearInterval(hostAnnounceTimer);
+      hostAnnounceTimer = setInterval(announceRoom, ANNOUNCE_MS);
+      announceRoom();
       broadcastPlayerList();
-      notifyPlayers();
-      if(onMessage) onMessage({ type: 'host_changed_local', newHostPeerId: targetId });
+      startHostScan();
+      if(onMessage) onMessage({ type: 'became_host', oldHostPeerId: null });
     });
 
     /* ★ 房主切换私人/公开 */
@@ -943,7 +955,17 @@ function resetActionSeq(){
 
   /* ★ 房主操作 */
   function sendKick(peerId){ send('kick_player', { peerId: peerId }); }
-  function sendTransferHost(peerId){ send('transfer_host', { peerId: peerId }); }
+  function sendTransferHost(peerId){
+    if(!isHost) return;
+    isHost = false;
+    stopAnnounce();
+    stopHostScan();
+    hostPeerId = peerId;
+    broadcastPlayerList();
+    notifyPlayers();
+    if(onMessage) onMessage({ type: 'host_changed_local', newHostPeerId: peerId });
+    send('transfer_host', { peerId: peerId });
+  }
   function sendTogglePrivate(isPrivate){ send('toggle_private', { isPrivate: isPrivate }); }
 
   /* ★ 请求房主发状态给新观众 */
