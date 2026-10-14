@@ -28,5 +28,22 @@ window.PokerDeck = (function(){
     }
   }
 
-  return { RANKS: RANKS, SUITS: SUITS, RANK_VALUES: RANK_VALUES, create: create, shuffle: shuffle };
+  function keccak256OfString(str){
+    if(!window.ethers) throw new Error('ethers not loaded');
+    const bytes = new TextEncoder().encode(str);
+    return window.ethers.keccak256(bytes);
+  }
+
+  function shuffleWithSeed(arr, seedHex){
+    const a = arr.slice();
+    for(let i = a.length - 1; i > 0; i--){
+      const hash = keccak256OfString(seedHex + ':' + (a.length - i));
+      const big = BigInt('0x' + hash.slice(2, 15));
+      const j = Number(big % BigInt(i + 1));
+      const t = a[i]; a[i] = a[j]; a[j] = t;
+    }
+    return a;
+  }
+
+  return { RANKS: RANKS, SUITS: SUITS, RANK_VALUES: RANK_VALUES, create: create, shuffle: shuffle, shuffleWithSeed: shuffleWithSeed };
 })();
