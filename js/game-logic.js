@@ -1577,6 +1577,10 @@ function doHumanAction(action){
     playActionSound(action);
   }
   if(G.online.active && !G.online.isHost){
+    if(G.gameMode === 'real' && (!window.PokerWallet || !PokerWallet.isConnected())){
+      appToast(isEn() ? 'Connect wallet before acting in on-chain room' : '链上场必须先连接钱包才能行动', 'error');
+      return;
+    }
     showSigningHint(true);
     const payload = {
       playerId: PokerOnline.getMyId(),
