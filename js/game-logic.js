@@ -136,6 +136,7 @@ async function startNewHandAi(){
   G.pot = 0; G.community = [];
   G.currentBet = 0; G.lastRaiseAmount = G.bigBlind;
   G.stage = "preflop"; G.busy = false; G._busySince = 0;
+  if(G.online.active && G.online.isHost) G.online.started = true;
   G._nextHandEndsAt = 0;
   G._deltaShown = false;
   G.raiseCount = 1;
