@@ -18,10 +18,11 @@ window.PokerEval = (function(){
 
     let isStraight = false, straightHigh = 0;
     const uniq = [...new Set(values)].sort(function(a, b){ return b - a; });
+    if(uniq.length < 5) { /* 5 张牌里至少 5 个不同点数才可能是顺子 */ }
     if(uniq.length >= 5){
       for(let i = 0; i <= uniq.length - 5; i++){
         const seq = uniq.slice(i, i + 5);
-        if(seq[0] - seq[4] === 4){ isStraight = true; straightHigh = seq[0]; break; }
+        if(seq[0] - seq[4] === 4 && new Set(seq).size === 5){ isStraight = true; straightHigh = seq[0]; break; }
       }
       if(!isStraight && uniq.indexOf(14) !== -1){
         const mapped = uniq.map(function(v){ return v === 14 ? 1 : v; })

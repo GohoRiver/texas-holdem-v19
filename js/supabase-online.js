@@ -5,6 +5,7 @@ window.PokerOnline = (function(){
   let supabase = null;
   let channel = null;
   let myId = null;
+  let myAuthUid = null;
   let nickname = 'Player';
   let currentRoomId = null;
   let isHost = false;
@@ -40,6 +41,7 @@ async function upsertMyPubkey(roomId, peerId){
     if(!roomExists){
       const { error: roomErr } = await sb.from('rooms').upsert({
         room_id: roomId,
+        owner_id: myAuthUid,
         mode: roomInfo.mode || 'points',
         level: roomInfo.level || 'nano',
         small_blind: 100,
@@ -69,6 +71,7 @@ async function upsertMyPubkey(roomId, peerId){
         peer_id: peerId,
         name: nickname,
         pubkey: pubkeyStr,
+        owner_id: myAuthUid,
         seat: 0,
         chips: 10000
       }, { onConflict: 'room_id,peer_id' });   // ★ 直接 upsert，不管存不存在
@@ -113,11 +116,30 @@ async function waitSeatedPubkeys(timeoutMs){
 
   function init(){
     if(!window.supabase) return Promise.reject(new Error('Supabase SDK not loaded'));
-    supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { persistSession: true, autoRefreshToken: true, storageKey: 'poker_auth_session' }
+    });
     myId = 'p-' + Math.random().toString(36).slice(2, 10);
     nickname = PokerStorage.getNickname() || 'Player';
-    try { initLobbyChannel(); } catch(e){}
-    return Promise.resolve();
+
+    return (async function(){
+      try {
+        const userRes = await supabase.auth.getUser();
+        const existingUser = userRes && userRes.data && userRes.data.user;
+        if(existingUser && existingUser.id){
+          myAuthUid = existingUser.id;
+          console.log('[auth] 恢复匿名会话 uid =', myAuthUid.slice(0,8) + '...');
+        } else {
+          const signRes = await supabase.auth.signInAnonymously();
+          if(signRes && signRes.error) throw signRes.error;
+          myAuthUid = signRes.data.user.id;
+          console.log('[auth] 新建匿名会话 uid =', myAuthUid.slice(0,8) + '...');
+        }
+      } catch(e){
+        console.warn('[auth] 匿名登录失败，RLS 策略可能拒绝写库', e);
+      }
+      try { initLobbyChannel(); } catch(e){}
+    })();
   }
 
   function setMessageCallback(cb){ onMessage = cb; }
@@ -232,7 +254,7 @@ function broadcastPlayerList(){
   }
 
   let hostScanTimer = null;
-const PEER_TIMEOUT_MS = 20000;
+const PEER_TIMEOUT_MS = 60000;
 
 function startHostScan(){
   if(hostScanTimer) clearInterval(hostScanTimer);
@@ -432,7 +454,7 @@ function stopHostScan(){
       if(!roomPlayers[targetId]) return;
       hostPeerId = targetId;
       isHost = false;
-      try { channel.send({ type:'broadcast', event:'host_transferred', payload:{ newHostPeerId: targetId, oldHostPeerId: myId } }); } catch(e){}
+      try { channel.send({ type:'broadcast', event:'host_transferred', payload:{ newHostPeerId: targetId } }); } catch(e){}
       /* 停止自己的公告 */
       stopAnnounce();
       broadcastPlayerList();
@@ -480,12 +502,26 @@ channel.on('broadcast', { event: 'sync_request' }, (payload) => {
       if(onMessage) onMessage({ type: 'player_action', ...payload.payload });
     });
 
+    /* ★ 玩家请求补码（房主处理） */
+    channel.on('broadcast', { event: 'rebuy' }, (payload) => {
+      if(!isHost) return;
+      if(onMessage) onMessage({ type: 'rebuy', ...payload.payload });
+    });
+
     channel.on('broadcast', { event: 'chat' }, (payload) => {
       if(onMessage) onMessage({ type: 'chat', ...payload.payload });
     });
 
     channel.on('broadcast', { event: 'show_cards' }, (payload) => {
       if(onMessage) onMessage({ type: 'show_cards', ...payload.payload });
+    });
+
+    channel.on('broadcast', { event: 'request_reveal' }, (payload) => {
+      if(onMessage) onMessage({ type: 'request_reveal', ...payload.payload });
+    });
+
+    channel.on('broadcast', { event: 'reveal_hole' }, (payload) => {
+      if(onMessage) onMessage({ type: 'reveal_hole', ...payload.payload });
     });
 
     /* 客户端状态广播（房主用）*/
@@ -666,8 +702,24 @@ async function buildJoinPayload(roomId, peerId){
       if(onMessage) onMessage({ type: 'chat', ...payload.payload });
     });
 
+    channel.on('broadcast', { event: 'rebuy' }, (payload) => {
+      if(onMessage) onMessage({ type: 'rebuy', ...payload.payload });
+    });
+
+    channel.on('broadcast', { event: 'rebuy' }, (payload) => {
+      if(onMessage) onMessage({ type: 'rebuy', ...payload.payload });
+    });
+
     channel.on('broadcast', { event: 'show_cards' }, (payload) => {
       if(onMessage) onMessage({ type: 'show_cards', ...payload.payload });
+    });
+
+    channel.on('broadcast', { event: 'request_reveal' }, (payload) => {
+      if(onMessage) onMessage({ type: 'request_reveal', ...payload.payload });
+    });
+
+    channel.on('broadcast', { event: 'reveal_hole' }, (payload) => {
+      if(onMessage) onMessage({ type: 'reveal_hole', ...payload.payload });
     });
 
         return new Promise(function(resolve){
@@ -958,11 +1010,14 @@ resetActionSeq();
     sendFullState, sendPlayerAction, sendGameStart, sendHostLeft,
     sendChat: function(payload){ send('chat', payload); },
     sendShowCards,
+    sendRequestReveal: function(payload){ send('request_reveal', payload); },
+    sendRevealHole: function(payload){ send('reveal_hole', payload); },
     sendTakeSeat, sendLeaveSeat,
     sendKick, sendTransferHost, sendTogglePrivate,
     requestState,
     setMessageCallback, setPlayersCallback, setRoomsCallback, toggleReady,
     becomeHost,
+    getMyAuthUid: function(){ return myAuthUid; },
     getMyId: function(){ return myId; },
     getRoomId: function(){ return currentRoomId; },
     getRoomPlayers: function(){ return roomPlayers; },

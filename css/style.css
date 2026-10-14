@@ -3273,3 +3273,29 @@ body.is-mobile.orientation-landscape .settlement-panel{
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
+
+/* ===== 左侧对局记录面板 ===== */
+.side-history{
+  max-height: 240px;
+  overflow-y: auto;
+  font-size: 11px;
+}
+.side-history .ingame-history-item{
+  padding: 6px 8px;
+  margin-bottom: 4px;
+  font-size: 11px;
+}
+.side-history .ihi-row{
+  gap: 6px;
+  margin: 2px 0;
+}
+.side-history .ihi-label{
+  min-width: 24px;
+  font-size: 10px;
+}
+.side-history .ingame-history-empty{
+  padding: 12px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 11px;
+}

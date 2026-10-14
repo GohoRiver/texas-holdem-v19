@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -212,7 +212,7 @@
       <details class="faq-item"><summary data-i18n="faq3Q">能不能有人串通？</summary><p data-i18n="faq3A">能，和任何线上牌桌一样。平台无法判断几个人是否联手下注，但每手记录都会保留，事后可复盘查看。</p></details>
       <details class="faq-item"><summary data-i18n="faq4Q">桌上会不会有机器人？</summary><p data-i18n="faq4A">AI 练习场有 AI 对手，这是设计的一部分。积分场和链上场是真人 P2P 联机。</p></details>
       <details class="faq-item"><summary data-i18n="faq5Q">网络不好会不会吃亏？</summary><p data-i18n="faq5A">轮到你下注 30 秒没回应，按弃牌并在这手后离桌。刷新页面 45 秒内回来可以接着打。</p></details>
-      <details class="faq-item"><summary data-i18n="faq6Q">钱放在哪，运营方跑路怎么办？</summary><p data-i18n="faq6A">链上场的 BEM 托管在你部署的合约里（地址 0x19fA…c2c3），只有 deposit 和 withdraw 两个函数。运营方消失也不影响你随时提回 BEM。</p></details>
+      <details class="faq-item"><summary data-i18n="faq6Q">钱放在哪，运营方跑路怎么办？</summary><p data-i18n="faq6A">链上场的 BEM 托管在你部署的合约里（地址 0xD3A6a1605aDC9092aac058c4ABBBc9B513b0aa7c），只有 deposit 和 withdraw 两个函数。运营方消失也不影响你随时提回 BEM。</p></details>
       <details class="faq-item"><summary data-i18n="faq7Q">要付什么费用？</summary><p data-i18n="faq7A">链上场充值时收 2% 手续费；提现只付 BSC 网络 gas。AI 场和积分场完全免费。</p></details>
       <details class="faq-item"><summary data-i18n="faq8Q">抽水去了哪里？</summary><p data-i18n="faq8A">链上牌桌的抽水按 1% 计算，封顶 1 个大盲，从主池扣除，进入合约公示的抽水收款地址。</p></details>
       <details class="faq-item"><summary data-i18n="faq9Q">合约审计过吗？</summary><p data-i18n="faq9A">没有经过独立审计。请按"未审计的合约"来看待它：先小金额试。</p></details>
@@ -314,6 +314,10 @@
       <div class="panel">
         <div class="panel-title" data-i18n="handInfoTitle">本手信息</div>
         <div class="hand-info" id="handInfo"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title" data-i18n="ingameHistoryTitle">对局记录</div>
+        <div class="side-history" id="sideHistoryBody"></div>
       </div>
     </aside>
     <div class="table-area">
@@ -541,7 +545,11 @@
 <script src="js/wallet.js"></script>
 <script src="js/supabase-online.js"></script>
 <script src="js/crypto-client.js"></script>
-<script src="js/game.js"></script>
+<script src="js/game-core.js"></script>
+<script src="js/game-ui.js"></script>
+<script src="js/game-logic.js"></script>
+<script src="js/game-net.js"></script>
+<script src="js/game-main.js"></script>
 <script src="js/wallet-bind.js"></script>
 </body>
 </html>
